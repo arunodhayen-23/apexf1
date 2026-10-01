@@ -10,7 +10,7 @@ import CircuitWorld from './circuit-world'
 function Box({position,scale,color,rotation=0}:{position:[number,number,number];scale:[number,number,number];color:string;rotation?:number}) {
  return <mesh position={position} rotation={[0,rotation,0]} castShadow receiveShadow><boxGeometry args={scale}/><meshStandardMaterial color={color} roughness={.48} metalness={.35}/></mesh>
 }
-export function Car({color='#233fc4',accent='#f7c633',number=1}:{color?:string;accent?:string;number?:number}) {
+export function Car({color='#233fc4',accent='#f7c633',number=1,tyreColor='#e6b92c'}:{color?:string;accent?:string;number?:number;tyreColor?:string}) {
  const numberMap=useMemo(()=>{const canvas=document.createElement('canvas');canvas.width=128;canvas.height=128;const ctx=canvas.getContext('2d')!;ctx.fillStyle=color;ctx.fillRect(0,0,128,128);ctx.fillStyle='#ffffff';ctx.font='italic bold 80px Arial';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(String(number),64,69);const texture=new THREE.CanvasTexture(canvas);texture.colorSpace=THREE.SRGBColorSpace;return texture},[number,color])
  useEffect(()=>()=>numberMap.dispose(),[numberMap])
  return <group>
@@ -32,7 +32,7 @@ export function Car({color='#233fc4',accent='#f7c633',number=1}:{color?:string;a
    {[-1.45,1.45].map(z=><group key={z} position={[side*1.07,.48,z]} rotation={[0,0,Math.PI/2]}>
     <mesh castShadow><cylinderGeometry args={[.48,.48,.48,24]}/><meshStandardMaterial color="#101114" roughness={.9}/></mesh>
     <mesh position={[0,side*.245,0]}><cylinderGeometry args={[.28,.28,.015,16]}/><meshStandardMaterial color="#34363b" metalness={.9} roughness={.3}/></mesh>
-    <mesh position={[0,side*.26,0]} rotation={[Math.PI/2,0,0]}><torusGeometry args={[.37,.018,6,24]}/><meshStandardMaterial color="#e6b92c"/></mesh>
+    <mesh position={[0,side*.26,0]} rotation={[Math.PI/2,0,0]}><torusGeometry args={[.37,.018,6,24]}/><meshStandardMaterial color={tyreColor}/></mesh>
    </group>)}
   </group>)}
   <mesh position={[0,.96,.15]}><sphereGeometry args={[.26,16,12]}/><meshStandardMaterial color={accent}/></mesh>
@@ -53,14 +53,14 @@ function RaceWorld({race,c,setup,keys,onUpdate}:{race:Race;c:Circuit;setup:Setup
   camera.position.lerp(target,1-Math.exp(-delta*9));look.set(p.x+Math.sin(p.heading)*18,1,p.z+Math.cos(p.heading)*18);camera.lookAt(look)
   timer.current+=delta;if(timer.current>.1&&mounted.current){onUpdate();timer.current=0}
  })
- return <><CircuitWorld c={c} track={setup.track}/>{race.cars.map((car,i)=><group key={i} ref={el=>{cars.current[i]=el}}><Car color={car.color} number={i===0?drivers[setup.driver].number:drivers.find(d=>d.name===car.name)?.number??(i===4?4:81)} accent={i===0?teams[setup.team].accent:undefined}/></group>)}</>
+ return <><CircuitWorld c={c} track={setup.track}/>{race.cars.map((car,i)=><group key={i} ref={el=>{cars.current[i]=el}}><Car color={car.color} number={i===0?drivers[setup.driver].number:drivers.find(d=>d.name===car.name)?.number??(i===4?4:81)} accent={i===0?teams[setup.team].accent:undefined} tyreColor={i===0?({soft:'#ec4949',medium:'#e8c547',hard:'#e8edf0'} as const)[car.tyre]:'#d4d7d9'}/></group>)}</>
 }
 class GraphicsBoundary extends Component<{children:ReactNode},{failed:boolean}>{
  state={failed:false};static getDerivedStateFromError(){return {failed:true}}
  render(){return this.state.failed?<div className="graphics-error">3D rendering is unavailable. Enable hardware acceleration and reload in a WebGL-compatible desktop browser.</div>:this.props.children}
 }
 function Scene({team=0,number=1,race,c,setup,keys,onUpdate}:{team?:number;number?:number;race?:Race;c?:Circuit;setup?:Setup;keys?:Set<string>;onUpdate?:()=>void}) {
- return <GraphicsBoundary><Canvas dpr={[1,1.5]} camera={{position:[6,3.4,6],fov:race?65:32}} gl={{antialias:true}} fallback={<div className="graphics-error">A WebGL-compatible browser is required to race.</div>}>
+ return <GraphicsBoundary><Canvas dpr={[1,1.35]} camera={{position:[6,3.4,6],fov:race?65:32}} gl={{antialias:true,powerPreference:'high-performance',toneMapping:THREE.ACESFilmicToneMapping}} fallback={<div className="graphics-error">A WebGL-compatible browser is required to race.</div>}>
   {race&&c&&setup&&keys&&onUpdate?<RaceWorld race={race} c={c} setup={setup} keys={keys} onUpdate={onUpdate}/>:<>
    <ambientLight intensity={1.6}/><directionalLight position={[5,8,3]} intensity={4}/><directionalLight position={[-6,3,-2]} intensity={3} color="#7c9bff"/>
    <group rotation={[0,-.45,0]}><Car color={teams[team].color} accent={teams[team].accent} number={number}/></group>

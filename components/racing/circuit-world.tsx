@@ -63,6 +63,20 @@ function TrackSurface({ c, desert }: { c: Circuit; desert: boolean }) {
   useEffect(() => () => { geometry.dispose() }, [geometry])
   return <mesh geometry={geometry} receiveShadow><meshStandardMaterial attach="material-0" map={texture} vertexColors roughness={.96} side={THREE.DoubleSide} polygonOffset polygonOffsetFactor={-2} polygonOffsetUnits={-2} /><meshStandardMaterial attach="material-1" vertexColors roughness={.9} side={THREE.DoubleSide} polygonOffset polygonOffsetFactor={-2} polygonOffsetUnits={-2} /></mesh>
 }
+function PitLane({ c }: { c: Circuit }) {
+  const geometry=useMemo(()=>{
+    const positions:number[]=[],indices:number[]=[],count=c.samples.length,offset=-(c.width/2+3.5),halfWidth=2.5
+    for(let i=0;i<=count;i++){
+      const p=pose(c,i/count*c.length,offset)
+      positions.push(p.x+Math.sin(p.heading)*-halfWidth,.055,p.z+Math.cos(p.heading)*-halfWidth)
+      positions.push(p.x+Math.sin(p.heading)*halfWidth,.055,p.z+Math.cos(p.heading)*halfWidth)
+      if(i<count){const a=i*2;indices.push(a,a+2,a+1,a+1,a+2,a+3)}
+    }
+    const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));g.setIndex(indices);g.computeVertexNormals();return g
+  },[c])
+  useEffect(()=>()=>geometry.dispose(),[geometry])
+  return <mesh geometry={geometry} receiveShadow><meshStandardMaterial color="#31383d" roughness={.94} side={THREE.DoubleSide}/></mesh>
+}
 function Sign({ text, width = 10 }: { text: string; width?: number }) {
   const texture = useMemo(() => {
     const canvas = document.createElement('canvas'); canvas.width = 512; canvas.height = 128
@@ -83,9 +97,10 @@ export default function CircuitWorld({ c, track }: { c: Circuit; track: number }
       if (i % 2 === 0) barriers.push({ ...p, y: 2.1, scale: [.09, 3, .09], color: '#777f80' })
       for (const y of [1.5, 2.2, 2.9]) barriers.push({ ...p, y, scale: [.045, .035, c.length / count + .15], color: '#939b99' })
     }
+    const scenicSamples=c.samples.filter((_,index)=>index%16===0)
     for (let i = 0; i < (urban ? 100 : 420); i++) {
       const p = pose(c, i / (urban ? 100 : 420) * c.length, (i % 2 ? 1 : -1) * (30 + (i * 17 % 95)))
-      if (c.samples.some(s => Math.hypot(s.x - p.x, s.z - p.z) < 23)) continue
+      if (scenicSamples.some(s => Math.hypot(s.x - p.x, s.z - p.z) < 23)) continue
       if (urban) {
         const height = 9 + i % 7 * 4
         buildings.push({ ...p, y: height / 2, scale: [15, height, 18], color: ['#d3c5b1', '#e3d7c3', '#babec0'][i % 3] })
@@ -128,6 +143,7 @@ export default function CircuitWorld({ c, track }: { c: Circuit; track: number }
     <directionalLight position={[80, 100, 40]} intensity={2.5} color={desert ? '#ffdfae' : '#fff6e4'} />
     <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -.05, 0]} receiveShadow><planeGeometry args={[14000, 14000]} /><meshStandardMaterial color={desert ? '#baa382' : urban ? '#aaa897' : '#6d8050'} roughness={1} /></mesh>
     <TrackSurface c={c} desert={desert} />
+    <PitLane c={c}/>
     <Instances items={scenery.barriers} /><Instances items={scenery.trunks} /><Instances items={scenery.trees} shape="cone" /><Instances items={scenery.buildings} /><Instances items={scenery.windows} /><Instances items={scenery.crowds} />
     {[0, 1, 2, 3].map(i => { const p = pose(c, 65 + i * 65); return <group key={i} position={[p.x, 0, p.z]} rotation={[0, p.heading, 0]}>
       {[0, 1, 2, 3, 4].map(row => <Block key={row} position={[c.width / 2 + 20 + row * 1.8, .5 + row * .45, 0]} size={[1.8, 1 + row * .9, 51]} color="#969f9f" />)}
