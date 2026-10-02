@@ -4,11 +4,27 @@ import { Canvas, useFrame } from '@react-three/fiber'
 import { ContactShadows, OrbitControls } from '@react-three/drei'
 import { Component, memo, useEffect, useMemo, useRef, type ReactNode } from 'react'
 import * as THREE from 'three'
-import { type Circuit, type Race, type Setup, step, teams, drivers } from '@/lib/racing'
+import { type Circuit, type Race, type Setup, step, teams, drivers, type Weather } from '@/lib/racing'
 import CircuitWorld from './circuit-world'
 
 function Box({position,scale,color,rotation=0}:{position:[number,number,number];scale:[number,number,number];color:string;rotation?:number}) {
  return <mesh position={position} rotation={[0,rotation,0]} castShadow receiveShadow><boxGeometry args={scale}/><meshStandardMaterial color={color} roughness={.48} metalness={.35}/></mesh>
+}
+function RivalCar({color}:{color:string}) {
+ return <group>
+  <Box position={[0,.39,0]} scale={[1.75,.2,3.9]} color={color}/><Box position={[0,.58,-.45]} scale={[1.05,.42,1.65]} color={color}/>
+  <Box position={[0,.35,2.25]} scale={[.65,.15,1.55]} color={color}/><Box position={[0,.42,2.9]} scale={[2.35,.1,.45]} color={color}/>
+  <Box position={[0,.92,-1.9]} scale={[2.1,.12,.62]} color={color}/>
+  {[-1,1].map(side=>[-1.35,1.35].map(z=><mesh key={`${side}-${z}`} position={[side*1.02,.47,z]} rotation={[0,0,Math.PI/2]} castShadow><cylinderGeometry args={[.43,.43,.42,12]}/><meshStandardMaterial color="#111318" roughness={.9}/></mesh>))}
+ </group>
+}
+function WeatherFx({weather}:{weather:Weather}) {
+ const count=weather==='heavy-rain'?520:weather==='rain'?300:0
+ const geometry=useMemo(()=>{const g=new THREE.BufferGeometry(),positions=new Float32Array(count*6);for(let i=0;i<count;i++){const x=(Math.random()-.5)*34,z=(Math.random()-.5)*34,y=2+Math.random()*18,offset=i*6;positions.set([x,y,z,x,y-.8,z],offset)}g.setAttribute('position',new THREE.BufferAttribute(positions,3).setUsage(THREE.DynamicDrawUsage));return g},[count])
+ useEffect(()=>()=>geometry.dispose(),[geometry])
+ useFrame((_,delta)=>{if(!count)return;const attribute=geometry.getAttribute('position') as THREE.BufferAttribute,positions=attribute.array as Float32Array,speed=weather==='heavy-rain'?35:23;for(let i=0;i<count;i++){const offset=i*6,y=positions[offset+1]-speed*delta;if(y<0){positions[offset]=(Math.random()-.5)*34;positions[offset+1]=16+Math.random()*5;positions[offset+2]=(Math.random()-.5)*34}else positions[offset+1]=y;positions[offset+4]=positions[offset+1]-.8}attribute.needsUpdate=true})
+ if(!count)return null
+ return <lineSegments geometry={geometry}><lineBasicMaterial color="#c7dce7" transparent opacity={weather==='heavy-rain'?.27:.18}/></lineSegments>
 }
 export function Car({color='#233fc4',accent='#f7c633',number=1,tyreColor='#e6b92c'}:{color?:string;accent?:string;number?:number;tyreColor?:string}) {
  const numberMap=useMemo(()=>{const canvas=document.createElement('canvas');canvas.width=128;canvas.height=128;const ctx=canvas.getContext('2d')!;ctx.fillStyle=color;ctx.fillRect(0,0,128,128);ctx.fillStyle='#ffffff';ctx.font='italic bold 80px Arial';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(String(number),64,69);const texture=new THREE.CanvasTexture(canvas);texture.colorSpace=THREE.SRGBColorSpace;return texture},[number,color])
@@ -41,19 +57,22 @@ export function Car({color='#233fc4',accent='#f7c633',number=1,tyreColor='#e6b92
  </group>
 }
 function RaceWorld({race,c,setup,keys,onUpdate}:{race:Race;c:Circuit;setup:Setup;keys:Set<string>;onUpdate:()=>void}){
- const cars=useRef<(THREE.Group|null)[]>([]), accumulator=useRef(0), timer=useRef(0), mounted=useRef(false)
+ const cars=useRef<(THREE.Group|null)[]>([]), previous=useRef<{x:number;z:number;heading:number}[]>([]), accumulator=useRef(0), timer=useRef(0), mounted=useRef(false)
  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false}},[])
  const target=useMemo(()=>new THREE.Vector3(),[]), look=useMemo(()=>new THREE.Vector3(),[])
  useFrame(({camera},delta)=>{
   accumulator.current+=Math.min(delta,.1)
-  while(accumulator.current>=1/60){step(race,c,setup,keys,1/60);accumulator.current-=1/60}
-  race.cars.forEach((car,i)=>{const g=cars.current[i];if(g){g.visible=i===0||!car.finish;g.position.set(car.x,0,car.z);g.rotation.y=car.heading}})
-  const p=race.cars[0], distance=race.camera?-.45:9
+  if(previous.current.length!==race.cars.length)previous.current=race.cars.map(car=>({x:car.x,z:car.z,heading:car.heading}))
+  while(accumulator.current>=1/60){race.cars.forEach((car,i)=>Object.assign(previous.current[i],{x:car.x,z:car.z,heading:car.heading}));step(race,c,setup,keys,1/60);accumulator.current-=1/60}
+  const alpha=race.paused||race.countdown>0?1:accumulator.current*60
+  const rendered=race.cars.map((car,i)=>{const old=previous.current[i];let turn=Math.atan2(Math.sin(car.heading-old.heading),Math.cos(car.heading-old.heading));return{x:old.x+(car.x-old.x)*alpha,z:old.z+(car.z-old.z)*alpha,heading:old.heading+turn*alpha}})
+  race.cars.forEach((car,i)=>{const g=cars.current[i],pose=rendered[i];if(g){g.visible=i===0||!car.finish;g.position.set(pose.x,0,pose.z);g.rotation.y=pose.heading}})
+  const p=rendered[0], distance=race.camera?-.45:9
   target.set(p.x-Math.sin(p.heading)*distance,race.camera?1.35:4.3,p.z-Math.cos(p.heading)*distance)
-  camera.position.lerp(target,1-Math.exp(-delta*9));look.set(p.x+Math.sin(p.heading)*18,1,p.z+Math.cos(p.heading)*18);camera.lookAt(look)
+  camera.position.lerp(target,1-Math.exp(-delta*12));look.set(p.x+Math.sin(p.heading)*18,1,p.z+Math.cos(p.heading)*18);camera.lookAt(look)
   timer.current+=delta;if(timer.current>.1&&mounted.current){onUpdate();timer.current=0}
  })
- return <><CircuitWorld c={c} track={setup.track}/>{race.cars.map((car,i)=><group key={i} ref={el=>{cars.current[i]=el}}><Car color={car.color} number={i===0?drivers[setup.driver].number:drivers.find(d=>d.name===car.name)?.number??(i===4?4:81)} accent={i===0?teams[setup.team].accent:undefined} tyreColor={i===0?({soft:'#ec4949',medium:'#e8c547',hard:'#e8edf0'} as const)[car.tyre]:'#d4d7d9'}/></group>)}</>
+ return <><CircuitWorld c={c} track={setup.track} weather={setup.weather??'clear'} wetness={race.trackWetness}/>{race.cars.map((car,i)=><group key={i} ref={el=>{cars.current[i]=el}}>{i===0?<><Car color={car.color} number={drivers[setup.driver].number} accent={teams[setup.team].accent} tyreColor={({soft:'#ec4949',medium:'#e8c547',hard:'#e8edf0'} as const)[car.tyre]}/><WeatherFx weather={setup.weather??'clear'}/></>:<RivalCar color={car.color}/>}</group>)}</>
 }
 class GraphicsBoundary extends Component<{children:ReactNode},{failed:boolean}>{
  state={failed:false};static getDerivedStateFromError(){return {failed:true}}

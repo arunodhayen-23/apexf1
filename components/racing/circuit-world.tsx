@@ -3,7 +3,7 @@
 import { Sky } from '@react-three/drei'
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
-import { pose, tracks, type Circuit } from '@/lib/racing'
+import { pose, tracks, type Circuit, type Weather } from '@/lib/racing'
 
 type Placement = { x: number; y: number; z: number; heading?: number; scale: [number, number, number]; color: string }
 function Instances({ items, shape = 'box' }: { items: Placement[]; shape?: 'box' | 'cone' }) {
@@ -23,7 +23,7 @@ function Instances({ items, shape = 'box' }: { items: Placement[]; shape?: 'box'
 function Block({ position, size, color }: { position: [number, number, number]; size: [number, number, number]; color: string }) {
   return <mesh position={position} receiveShadow><boxGeometry args={size} /><meshStandardMaterial color={color} roughness={.8} /></mesh>
 }
-function TrackSurface({ c, desert }: { c: Circuit; desert: boolean }) {
+function TrackSurface({ c, desert, wetness }: { c: Circuit; desert: boolean; wetness: number }) {
   const texture = useMemo(() => {
     const canvas = document.createElement('canvas'); canvas.width = canvas.height = 256
     const ctx = canvas.getContext('2d')!, image = ctx.createImageData(256, 256)
@@ -61,7 +61,7 @@ function TrackSurface({ c, desert }: { c: Circuit; desert: boolean }) {
   }, [c, desert])
   useEffect(() => () => { texture.dispose() }, [texture])
   useEffect(() => () => { geometry.dispose() }, [geometry])
-  return <mesh geometry={geometry} receiveShadow><meshStandardMaterial attach="material-0" map={texture} vertexColors roughness={.96} side={THREE.DoubleSide} polygonOffset polygonOffsetFactor={-2} polygonOffsetUnits={-2} /><meshStandardMaterial attach="material-1" vertexColors roughness={.9} side={THREE.DoubleSide} polygonOffset polygonOffsetFactor={-2} polygonOffsetUnits={-2} /></mesh>
+  return <mesh geometry={geometry} receiveShadow><meshStandardMaterial attach="material-0" map={texture} vertexColors color={new THREE.Color(1-wetness*.19,1-wetness*.12,1-wetness*.08)} roughness={.96-wetness*.53} metalness={wetness*.12} side={THREE.DoubleSide} polygonOffset polygonOffsetFactor={-2} polygonOffsetUnits={-2} /><meshStandardMaterial attach="material-1" vertexColors roughness={.9} side={THREE.DoubleSide} polygonOffset polygonOffsetFactor={-2} polygonOffsetUnits={-2} /></mesh>
 }
 function PitLane({ c }: { c: Circuit }) {
   const geometry=useMemo(()=>{
@@ -86,7 +86,7 @@ function Sign({ text, width = 10 }: { text: string; width?: number }) {
   useEffect(() => () => texture.dispose(), [texture])
   return <mesh><boxGeometry args={[width, width / 4, .18]} /><meshStandardMaterial map={texture} /></mesh>
 }
-export default function CircuitWorld({ c, track }: { c: Circuit; track: number }) {
+export default function CircuitWorld({ c, track, weather, wetness }: { c: Circuit; track: number; weather: Weather; wetness: number }) {
   const venue = tracks[track], desert = venue.environment === 'desert', urban = venue.environment === 'harbour' || venue.environment === 'city'
   const scenery = useMemo(() => {
     const barriers: Placement[] = [], trees: Placement[] = [], trunks: Placement[] = [], buildings: Placement[] = [], windows: Placement[] = [], crowds: Placement[] = []
@@ -137,12 +137,12 @@ export default function CircuitWorld({ c, track }: { c: Circuit; track: number }
   }, [c])
   const start = pose(c, 0)
   return <>
-    <Sky distance={450000} sunPosition={desert ? [120, 40, 90] : [80, 100, 40]} turbidity={desert ? 7 : 3} rayleigh={.6} />
-    <fog attach="fog" args={[desert ? '#d8c8b3' : '#bbcdd2', 250, 1500]} />
-    <hemisphereLight args={['#e0efff', desert ? '#b89e75' : '#657259', 2]} />
-    <directionalLight position={[80, 100, 40]} intensity={2.5} color={desert ? '#ffdfae' : '#fff6e4'} />
+    <Sky distance={450000} sunPosition={desert ? [120, 40, 90] : [80, 100, 40]} turbidity={weather==='heavy-rain'?10:weather==='rain'?8:weather==='cloudy'?6:desert?7:3} rayleigh={weather==='clear'?.6:.35} />
+    <fog attach="fog" args={[weather==='heavy-rain'?'#82949d':weather==='rain'?'#99aab2':desert?'#d8c8b3':'#bbcdd2',weather==='heavy-rain'?100:250,weather==='heavy-rain'?850:1500]} />
+    <hemisphereLight args={['#e0efff', desert ? '#b89e75' : '#657259', weather==='heavy-rain'?1.1:weather==='rain'?1.4:2]} />
+    <directionalLight position={[80, 100, 40]} intensity={weather==='heavy-rain'?.95:weather==='rain'?1.35:weather==='cloudy'?1.8:2.5} color={desert&&weather==='clear'?'#ffdfae':'#fff6e4'} />
     <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -.05, 0]} receiveShadow><planeGeometry args={[14000, 14000]} /><meshStandardMaterial color={desert ? '#baa382' : urban ? '#aaa897' : '#6d8050'} roughness={1} /></mesh>
-    <TrackSurface c={c} desert={desert} />
+    <TrackSurface c={c} desert={desert} wetness={wetness} />
     <PitLane c={c}/>
     <Instances items={scenery.barriers} /><Instances items={scenery.trunks} /><Instances items={scenery.trees} shape="cone" /><Instances items={scenery.buildings} /><Instances items={scenery.windows} /><Instances items={scenery.crowds} />
     {[0, 1, 2, 3].map(i => { const p = pose(c, 65 + i * 65); return <group key={i} position={[p.x, 0, p.z]} rotation={[0, p.heading, 0]}>
