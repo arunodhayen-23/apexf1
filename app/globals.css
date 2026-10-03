@@ -34,3 +34,6 @@
 .flag-canada{background:linear-gradient(90deg,#d80621 25%,#fff 25%,#fff 75%,#d80621 75%)}
 .flag-germany{background:linear-gradient(#000 33%,#dd0000 33%,#dd0000 67%,#ffce00 67%)}
 .flag-australia{background:linear-gradient(135deg,transparent 44%,#fff 45% 52%,#c8102e 53% 58%,transparent 59%),linear-gradient(90deg,#fff 45%,#c8102e 45% 55%,#fff 55%),linear-gradient(#012169 45%,#fff 45% 55%,#c8102e 55% 62%,#012169 62%)}
+.track-body{height:112px}.track-body .track-map{display:block;flex:0 0 49%;width:49%;height:108px;max-width:178px;border:1px solid #ffffff22;border-radius:4px;overflow:hidden;transform:none;color:inherit;box-shadow:0 5px 18px #0005}.selected .track-body .track-map{border-color:#ff554c80;box-shadow:0 0 18px #ef514126}.track-meta .track-signature{max-width:54%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#c5cbd0;font-size:7px;letter-spacing:.45px}.track-card.selected .track-meta .track-signature{color:#ff8d82}.track-note{color:#a0a7af}
+@media(max-width:1000px){.track-body{height:104px}.track-body .track-map{height:99px}}
+@media(max-width:740px){.track-body{height:100px}.track-body .track-map{height:94px;max-width:none;flex-basis:47%;width:47%}.track-meta .track-signature{max-width:49%;font-size:6px}}
