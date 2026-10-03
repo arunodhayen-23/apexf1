@@ -63,7 +63,7 @@ function TrackSurface({ c, visual, wetness }: { c: Circuit; visual: ReturnType<t
   useEffect(() => () => { texture.dispose() }, [texture])
   useEffect(() => () => { geometry.dispose() }, [geometry])
   const night=visual.daypart!=='day'
-  return <mesh geometry={geometry} receiveShadow><meshStandardMaterial attach="material-0" map={texture} vertexColors color={new THREE.Color(1-wetness*.19,1-wetness*.12,1-wetness*.08)} emissive={night?'#182535':'#000000'} emissiveIntensity={night?.52:0} roughness={.96-wetness*.53} metalness={wetness*.12} side={THREE.DoubleSide} polygonOffset polygonOffsetFactor={-2} polygonOffsetUnits={-2} /><meshStandardMaterial attach="material-1" vertexColors roughness={.9} side={THREE.DoubleSide} polygonOffset polygonOffsetFactor={-2} polygonOffsetUnits={-2} /></mesh>
+  return <mesh geometry={geometry} receiveShadow><meshStandardMaterial attach="material-0" map={texture} vertexColors color={new THREE.Color(1-wetness*.19,1-wetness*.12,1-wetness*.08)} emissive={night?'#9dcfff':'#000000'} emissiveIntensity={night?.42:0} roughness={.96-wetness*.53} metalness={wetness*.12} side={THREE.DoubleSide} polygonOffset polygonOffsetFactor={-2} polygonOffsetUnits={-2} /><meshStandardMaterial attach="material-1" vertexColors roughness={.9} side={THREE.DoubleSide} polygonOffset polygonOffsetFactor={-2} polygonOffsetUnits={-2} /></mesh>
 }
 function PitLane({ c }: { c: Circuit }) {
   const geometry=useMemo(()=>{
@@ -89,18 +89,9 @@ function Sign({ text, width = 10 }: { text: string; width?: number }) {
   return <mesh><boxGeometry args={[width, width / 4, .18]} /><meshStandardMaterial map={texture} /></mesh>
 }
 function Floodlights({ c, color }: { c: Circuit; color: string }) {
-  const stations=Math.max(12,Math.min(20,Math.round(c.length/360)))
-  const placements=useMemo(()=>Array.from({length:stations},(_,i)=>[-1,1].map(side=>{
-    const p=pose(c,(i+.35)/stations*c.length,side*(c.width/2+9))
-    return {x:p.x,z:p.z,light:i%2===0&&side===1}
-  })).flat(),[c,stations])
-  return <>
-    {placements.map((p,i)=><group key={i} position={[p.x,0,p.z]}>
-      <mesh position={[0,7.2,0]}><cylinderGeometry args={[.12,.22,14.4,6]}/><meshStandardMaterial color="#606d79" metalness={.7} roughness={.4}/></mesh>
-      <mesh position={[0,14.45,0]} rotation={[-.25,0,0]}><boxGeometry args={[2.4,.2,.75]}/><meshStandardMaterial color="#d9f3ff" emissive={color} emissiveIntensity={7} toneMapped={false}/></mesh>
-      {p.light&&<pointLight position={[0,13.5,0]} color={color} intensity={1200} distance={235} decay={2}/>}
-    </group>)}
-  </>
+  const stations=Math.max(8,Math.min(12,Math.ceil(c.length/500)))
+  const positions=useMemo(()=>Array.from({length:stations},(_,i)=>pose(c,(i+.35)/stations*c.length)),[c,stations])
+  return <>{positions.map((p,i)=><pointLight key={i} position={[p.x,24,p.z]} color={color} intensity={50000} distance={280} decay={2}/>)}</>
 }
 export default function CircuitWorld({ c, track, weather, wetness }: { c: Circuit; track: number; weather: Weather; wetness: number }) {
   const venue = tracks[track], visual=circuitVisual(venue.name), night=visual.daypart==='night', twilight=visual.daypart==='twilight'
