@@ -60,7 +60,7 @@ export function makeCircuit(id: number) {
   curve.arcLengthDivisions = 6000
   curve.updateArcLengths()
   const samples = curve.getSpacedPoints(3000).slice(0,3000)
-  return { curve, samples, length: curve.getLength(), width: tracks[id].width }
+  return { curve, samples, length: curve.getLength(), width: tracks[id].width * 1.18 }
 }
 export function pose(c: Circuit, distance: number, lane = 0) {
   const t = ((distance / c.length) % 1 + 1) % 1
@@ -182,7 +182,9 @@ export function step(r: Race,c: Circuit,setup: Setup,keys: Set<string>,dt: numbe
       car.drsOpen=drsAvailable
       if(r.time < car.mistakeUntil) target *= setup.difficulty===0?.68:.84
       if(ahead&&Math.abs(car.lane-ahead.lane)<3.8){const safeGap=6.2+Math.max(0,car.speed-ahead.speed)*.42;if(gap<safeGap+8)target=Math.min(target,Math.max(0,ahead.speed+(gap-safeGap)*.55))}
-      car.speed+=(target-car.speed)*Math.min(1,dt*1.8)
+      const speedDelta=target-car.speed
+      const speedChangeLimit=(speedDelta>=0?engine.acceleration*(1-r.trackWetness*.42):42*(1-r.trackWetness*.2))*dt
+      car.speed+=Math.sign(speedDelta)*Math.min(Math.abs(speedDelta),speedChangeLimit)
       const next=car.progress+car.speed*dt
       creditProgress(car,next,c,r.time,setup.laps)
       updateDRS(car,previousProgress,r,setup.track,c.length)
