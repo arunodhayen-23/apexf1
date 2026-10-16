@@ -68,7 +68,7 @@ export function pose(c: Circuit, distance: number, lane = 0) {
   return { x: p.x + tangent.z * lane, z: p.z - tangent.x * lane, heading: Math.atan2(tangent.x,tangent.z) }
 }
 export type Tyre = 'soft' | 'medium' | 'hard'
-export type Racer = { name: string; color: string; x: number; z: number; heading: number; speed: number; progress: number; checkpoint: number; lap: number; lapStart: number; best: number; finish: number; lane: number; pace: number; phase: number; consistency: number; mistakeUntil: number; nextEvent: number; tyre: Tyre; tyreWear: number; drsEligibleUntil: number; drsOpen: boolean; pitState: 'track' | 'entry' | 'stopped' | 'exit'; pitTimer: number }
+export type Racer = { name: string; color: string; x: number; z: number; heading: number; speed: number; progress: number; checkpoint: number; lap: number; lapStart: number; best: number; finish: number; lane: number; pace: number; phase: number; consistency: number; mistakeUntil: number; nextEvent: number; tyre: Tyre; tyreWear: number; drsEligibleUntil: number; drsOpen: boolean; inSlipstream: boolean; pitState: 'track' | 'entry' | 'stopped' | 'exit'; pitTimer: number }
 export type Race = { cars: Racer[]; time: number; countdown: number; paused: boolean; finished: boolean; camera: number; offroad: boolean; trackWetness: number }
 export const tyreSpecs: Record<Tyre, { label: string; color: string; grip: number; wear: number }> = {
   soft: { label: 'SOFT', color: '#ec4949', grip: 1.08, wear: 1.6 },
@@ -81,7 +81,7 @@ export function createRace(c: Circuit, setup: Setup, random: () => number = Math
   const names = [drivers[setup.driver].name, ...rivals]
   const startingWetness=(setup.trackCondition??'dry')==='dry'?0:setup.trackCondition==='damp'?.38:.76
   const rivalColors=['#e32932','#20cdb6','#233fc4','#f49b38','#f1eee8','#e32932','#20cdb6','#f49b38']
-  return { cars: names.map((name,i) => ({name, color: i === 0 ? teams[setup.team].color : rivalColors[(i-1)%rivalColors.length], ...pose(c, 8 - i*6, i%2 ? -3 : 3), speed:0, progress:8-i*6, checkpoint:1, lap:0, lapStart:0, best:Infinity, finish:0, lane:i%2 ? -3 : 3, pace:.94+random()*.12, phase:random()*Math.PI*2, consistency:.02+random()*.05, mistakeUntil:0, nextEvent:12+random()*22, tyre:'medium', tyreWear:0, drsEligibleUntil:Number.NEGATIVE_INFINITY, drsOpen:false, pitState:'track', pitTimer:0})), time:0, countdown:3.5, paused:false, finished:false, camera:0, offroad:false, trackWetness:startingWetness }
+  return { cars: names.map((name,i) => ({name, color: i === 0 ? teams[setup.team].color : rivalColors[(i-1)%rivalColors.length], ...pose(c, 8 - i*6, i%2 ? -3 : 3), speed:0, progress:8-i*6, checkpoint:1, lap:0, lapStart:0, best:Infinity, finish:0, lane:i%2 ? -3 : 3, pace:.94+random()*.12, phase:random()*Math.PI*2, consistency:.02+random()*.05, mistakeUntil:0, nextEvent:12+random()*22, tyre:'medium', tyreWear:0, drsEligibleUntil:Number.NEGATIVE_INFINITY, drsOpen:false, inSlipstream:false, pitState:'track', pitTimer:0})), time:0, countdown:3.5, paused:false, finished:false, camera:0, offroad:false, trackWetness:startingWetness }
 }
 export function changeTyres(r: Race, tyre: Tyre) {
   const car=r.cars[0]
@@ -92,7 +92,7 @@ export function requestPit(r: Race) {
   if(!r.paused&&!r.finished&&r.countdown<=0&&car.pitState==='track') { car.pitState='entry'; car.pitTimer=0 }
 }
 export function resetCar(r: Race,c: Circuit) {
-  const car=r.cars[0]; Object.assign(car,pose(c,car.progress,0)); car.speed=0; car.lane=0; car.pitState='track'; car.pitTimer=0
+  const car=r.cars[0]; Object.assign(car,pose(c,car.progress,0)); car.speed=0; car.lane=0; car.drsOpen=false; car.inSlipstream=false; car.pitState='track'; car.pitTimer=0
 }
 export function creditProgress(car: Racer, next: number, c: Circuit, time: number, laps: number) {
   const delta = next-car.progress
@@ -114,6 +114,24 @@ function trackGap(from: number, to: number, length: number) {
   if(gap>length/2) gap-=length
   if(gap< -length/2) gap+=length
   return gap
+}
+function slipstreamStrength(car: Racer, race: Race, circuit: Circuit, bend: number) {
+  if(bend>.22) return 0
+  let strongest=0
+  const sin=Math.sin(car.heading),cos=Math.cos(car.heading)
+  for(const other of race.cars) {
+    if(other===car||other.finish) continue
+    const gap=trackGap(car.progress,other.progress,circuit.length)
+    if(gap<5||gap>52) continue
+    const dx=other.x-car.x,dz=other.z-car.z
+    const forward=dx*sin+dz*cos
+    const lateral=Math.abs(dx*cos-dz*sin)
+    if(forward<0||forward>52||lateral>5.8) continue
+    const distanceFactor=Math.min(1,(52-gap)/32)
+    const laneFactor=Math.max(0,1-lateral/5.8)
+    strongest=Math.max(strongest,distanceFactor*laneFactor)
+  }
+  return strongest
 }
 function updateDRS(car: Racer, previousProgress: number, race: Race, track: number, length: number) {
   const zones=drsZonesForTrack(track)
@@ -148,16 +166,17 @@ export function step(r: Race,c: Circuit,setup: Setup,keys: Set<string>,dt: numbe
         car.nextEvent = r.time + 18 + (1 + Math.cos(car.phase + r.time)) * 18
       }
       const form = 1 + Math.sin(r.time * .19 + car.phase) * car.consistency
-      const traffic=r.cars.map(other=>({other,gap:other===car?Infinity:trackGap(car.progress,other.progress,c.length)})).filter(item=>item.gap>0&&item.gap<32).sort((a,b)=>a.gap-b.gap)
+      const traffic=r.cars.map(other=>({other,gap:other===car?Infinity:trackGap(car.progress,other.progress,c.length)})).filter(item=>item.gap>0&&item.gap<52).sort((a,b)=>a.gap-b.gap)
       const ahead=traffic[0]?.other, gap=traffic[0]?.gap??Infinity
       const preferredLane=(i%2?-3:3)
-      const passingLane=ahead&&gap>13?(ahead.lane>=0?-3.4:3.4):preferredLane
+      const passingLane=ahead&&bend<.28?(gap>5?(ahead.lane>=0?-4:4):car.lane):preferredLane
       car.lane+=(passingLane-car.lane)*Math.min(1,dt*1.05)
-      const slipstream = ahead && bend < .15 ? 1.06 : 1
+      const tow=slipstreamStrength(car,r,c,bend)
+      car.inSlipstream=tow>.08
       const engine=engineSpecs[setup.engine??'v10']
       const activeZone=drsZonesForTrack(setup.track).some(zone=>{const d=((car.progress%c.length)+c.length)%c.length;return d>=zone.start*c.length&&d<=zone.end*c.length})
       const drsAvailable=activeZone&&car.drsEligibleUntil>=car.progress&&r.trackWetness<=.2
-      let target=(70+setup.difficulty*7)*car.pace*form*slipstream*(1-r.trackWetness*.2)/(1+bend*3.1)
+      let target=(70+setup.difficulty*7)*car.pace*form*(1+tow*.13)*(1-r.trackWetness*.2)/(1+bend*3.1)
       if(drsAvailable)target+=7
       target=Math.min(target,engine.topSpeed+(drsAvailable?8:0))
       car.drsOpen=drsAvailable
@@ -174,7 +193,7 @@ export function step(r: Race,c: Circuit,setup: Setup,keys: Set<string>,dt: numbe
     const steer=Number(keys.has('a')||keys.has('arrowleft'))-Number(keys.has('d')||keys.has('arrowright'))
     if(keys.has('p')&&car.pitState==='track') { car.pitState='entry'; car.pitTimer=0 }
     if(car.pitState==='entry') {
-      car.drsOpen=false
+      car.drsOpen=false; car.inSlipstream=false
       car.pitTimer+=dt; car.speed=Math.min(car.speed,16); car.speed=Math.max(0,car.speed-8*dt)
       car.progress+=car.speed*dt; car.lane=-(c.width/2+3.5)
       creditProgress(car,car.progress,c,r.time,setup.laps)
@@ -184,12 +203,12 @@ export function step(r: Race,c: Circuit,setup: Setup,keys: Set<string>,dt: numbe
       return
     }
     if(car.pitState==='stopped') {
-      car.pitTimer=Math.max(0,car.pitTimer-dt); car.speed=0; car.drsOpen=false
+      car.pitTimer=Math.max(0,car.pitTimer-dt); car.speed=0; car.drsOpen=false; car.inSlipstream=false
       if(car.pitTimer===0) { car.pitState='exit'; car.pitTimer=0 }
       return
     }
     if(car.pitState==='exit') {
-      car.drsOpen=false
+      car.drsOpen=false; car.inSlipstream=false
       car.pitTimer+=dt; car.lane=-(c.width/2+3.5)*(1-Math.min(1,car.pitTimer/1.5))
       car.progress+=Math.max(car.speed,12)*dt; car.speed=Math.max(car.speed,12)
       creditProgress(car,car.progress,c,r.time,setup.laps)
@@ -206,6 +225,8 @@ export function step(r: Race,c: Circuit,setup: Setup,keys: Set<string>,dt: numbe
     const currentGrip=tyreSpecs[car.tyre].grip*(1-car.tyreWear*.32)*(1-r.trackWetness*.42)
     const bendStart=pose(c,car.progress),bendEnd=pose(c,car.progress+24)
     const bend=Math.abs(Math.atan2(Math.sin(bendEnd.heading-bendStart.heading),Math.cos(bendEnd.heading-bendStart.heading)))
+    const tow=slipstreamStrength(car,r,c,bend)
+    car.inSlipstream=tow>.08
     car.tyreWear=Math.min(1,car.tyreWear+dt*.00024*tyreSpecs[car.tyre].wear*(1+car.speed/100))
     let trafficSpeedCap=Infinity
     for(const rival of r.cars.slice(1)){
@@ -213,7 +234,8 @@ export function step(r: Race,c: Circuit,setup: Setup,keys: Set<string>,dt: numbe
       const dx=rival.x-car.x,dz=rival.z-car.z,forward=dx*Math.sin(car.heading)+dz*Math.cos(car.heading),lateral=Math.abs(dx*Math.cos(car.heading)-dz*Math.sin(car.heading))
       if(forward>0&&forward<Math.max(24,car.speed*.75)&&lateral<3.1){const safeGap=5.8;trafficSpeedCap=Math.min(trafficSpeedCap,Math.sqrt(rival.speed*rival.speed+2*36*(Math.max(0,forward-safeGap))))}
     }
-    let nextSpeed=Math.max(0,Math.min(engine.topSpeed+(drsOpen?8:0),car.speed+(accelerate?engine.acceleration*currentGrip: -3)*dt-(brake?42*(1-r.trackWetness*.2)*dt:0)-car.speed*car.speed*(drsOpen?.00105:.0017)*dt))
+    const drag=drsOpen?.00105:tow>.08?.0013:.0017
+    let nextSpeed=Math.max(0,Math.min(engine.topSpeed+(drsOpen?8:0),car.speed+(accelerate?engine.acceleration*currentGrip*(1+tow*.28): -3)*dt-(brake?42*(1-r.trackWetness*.2)*dt:0)-car.speed*car.speed*drag*dt))
     if(Number.isFinite(trafficSpeedCap)&&nextSpeed>trafficSpeedCap)nextSpeed=Math.max(trafficSpeedCap,car.speed-42*(1-r.trackWetness*.2)*dt)
     car.speed=nextSpeed
     car.heading+=steer*dt*1.88*Math.min(car.speed/12,1)/(1+car.speed/92)
@@ -236,12 +258,14 @@ export function step(r: Race,c: Circuit,setup: Setup,keys: Set<string>,dt: numbe
   for(let pass=0;pass<24;pass++)for(let i=0;i<r.cars.length;i++)for(let j=i+1;j<r.cars.length;j++){
     const a=r.cars[i],b=r.cars[j]
     if(a.finish||b.finish)continue
-    const dx=b.x-a.x,dz=b.z-a.z,dist=Math.hypot(dx,dz),minimum=6.8
+    const dx=b.x-a.x,dz=b.z-a.z,dist=Math.hypot(dx,dz),minimum=5.4
     if(dist>=minimum)continue
+    const headingDelta=Math.atan2(Math.sin(b.heading-a.heading),Math.cos(b.heading-a.heading)),heading=a.heading+headingDelta*.5
+    const lateral=Math.abs(dx*Math.cos(heading)-dz*Math.sin(heading))
     const aBehind=trackGap(a.progress,b.progress,c.length)>0,behind=aBehind?a:b,front=aBehind?b:a
     const angle=(i*31+j*17)*2.399963229728653,ux=dist>.001?dx/dist:Math.cos(angle),uz=dist>.001?dz/dist:Math.sin(angle),push=minimum-dist+.025
     a.x-=ux*push*.5;a.z-=uz*push*.5;b.x+=ux*push*.5;b.z+=uz*push*.5
-    if(!softened.has(behind)){behind.speed=Math.min(behind.speed,front.speed*.88);softened.add(behind)}
+    if(lateral<2.9&&!softened.has(behind)){behind.speed=Math.min(behind.speed,front.speed*.88);softened.add(behind)}
   }
   if(r.cars[0].finish) r.finished=true
 }
