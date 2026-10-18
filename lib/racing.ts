@@ -124,6 +124,12 @@ function upcomingCurvature(c: Circuit, progress: number) {
   for(const offset of [0,24,48,72,96])peak=Math.max(peak,curvatureBetween(c,progress+offset,24))
   return peak
 }
+function straightPowerFactor(c: Circuit, progress: number) {
+  let peak=0
+  for(const offset of [0,22,44])peak=Math.max(peak,curvatureBetween(c,progress+offset,22))
+  const blend=Math.max(0,Math.min(1,(.0055-peak)/.0045))
+  return blend*blend*(3-2*blend)
+}
 function slipstreamStrength(car: Racer, race: Race, circuit: Circuit, bend: number) {
   if(bend>.58) return 0
   let strongest=0
@@ -199,11 +205,14 @@ export function step(r: Race,c: Circuit,setup: Setup,keys: Set<string>,dt: numbe
       const tow=slipstreamStrength(car,r,c,bend)
       car.inSlipstream=tow>.08
       const engine=engineSpecs[setup.engine??'v10']
+      const straightPower=straightPowerFactor(c,car.progress)
+      const powerMultiplier=1+straightPower*.2
+      const straightTopSpeed=engine.topSpeed+straightPower*4
       const activeZone=drsZonesForTrack(setup.track).some(zone=>{const d=((car.progress%c.length)+c.length)%c.length;return d>=zone.start*c.length&&d<=zone.end*c.length})
       const drsAvailable=activeZone&&car.drsEligibleUntil>=car.progress&&r.trackWetness<=.2
-      let target=(70+setup.difficulty*7)*car.pace*form*(1+tow*.18)*(1-r.trackWetness*.2)/(1+bend*3.1)
+      let target=(70+setup.difficulty*7)*car.pace*form*(1+tow*.18)*(1-r.trackWetness*.2)*powerMultiplier/(1+bend*3.1)
       if(drsAvailable)target+=7
-      target=Math.min(target,engine.topSpeed+(drsAvailable?8:0)+tow*7)
+      target=Math.min(target,straightTopSpeed+(drsAvailable?8:0)+tow*7)
       car.drsOpen=drsAvailable
       if(r.time < car.mistakeUntil) target *= setup.difficulty===0?.68:.84
       const aiGrip=tyreSpecs[car.tyre].grip*(1-car.tyreWear*.32)*(1-r.trackWetness*.42)
@@ -212,7 +221,7 @@ export function step(r: Race,c: Circuit,setup: Setup,keys: Set<string>,dt: numbe
       target=Math.min(target,aiCornerLimit)
       if(blocking&&Math.abs(car.lane-blocking.other.lane)<3.8){const safeGap=8.5+Math.max(0,car.speed-blocking.other.speed)*.48;if(blocking.gap<safeGap+9)target=Math.min(target,Math.max(0,blocking.other.speed+(blocking.gap-safeGap)*.9))}
       const speedDelta=target-car.speed
-      const speedChangeLimit=(speedDelta>=0?engine.acceleration*(1-r.trackWetness*.42):42*(1-r.trackWetness*.2))*dt
+      const speedChangeLimit=(speedDelta>=0?engine.acceleration*powerMultiplier*(1-r.trackWetness*.42):42*(1-r.trackWetness*.2))*dt
       car.speed+=Math.sign(speedDelta)*Math.min(Math.abs(speedDelta),speedChangeLimit)
       const next=car.progress+car.speed*dt
       creditProgress(car,next,c,r.time,setup.laps)
@@ -255,6 +264,9 @@ export function step(r: Race,c: Circuit,setup: Setup,keys: Set<string>,dt: numbe
     const drsOpen=drsEligible&&keys.has('e')&&accelerate
     car.drsOpen=drsOpen
     const currentGrip=tyreSpecs[car.tyre].grip*(1-car.tyreWear*.32)*(1-r.trackWetness*.42)
+    const straightPower=straightPowerFactor(c,car.progress)
+    const powerMultiplier=1+straightPower*.2
+    const straightTopSpeed=engine.topSpeed+straightPower*4
     const bendStart=pose(c,car.progress),bendEnd=pose(c,car.progress+24)
     const bend=Math.abs(Math.atan2(Math.sin(bendEnd.heading-bendStart.heading),Math.cos(bendEnd.heading-bendStart.heading)))
     const tow=slipstreamStrength(car,r,c,bend)
@@ -268,7 +280,7 @@ export function step(r: Race,c: Circuit,setup: Setup,keys: Set<string>,dt: numbe
     }
     const drag=drsOpen?.00105:tow>.08?.00095:.0017
     const launchBoost=accelerate&&r.time<3&&car.speed<32?1.22:1
-    let nextSpeed=Math.max(0,Math.min(engine.topSpeed+(drsOpen?8:0)+tow*7,car.speed+(accelerate?engine.acceleration*currentGrip*(1+tow*.48)*launchBoost: -3)*dt-(brake?42*(1-r.trackWetness*.2)*dt:0)-car.speed*car.speed*drag*dt))
+    let nextSpeed=Math.max(0,Math.min(straightTopSpeed+(drsOpen?8:0)+tow*7,car.speed+(accelerate?engine.acceleration*currentGrip*(1+tow*.48)*powerMultiplier*launchBoost: -3)*dt-(brake?42*(1-r.trackWetness*.2)*dt:0)-car.speed*car.speed*drag*dt))
     if(Number.isFinite(trafficSpeedCap)&&nextSpeed>trafficSpeedCap)nextSpeed=Math.max(trafficSpeedCap,car.speed-42*(1-r.trackWetness*.2)*dt)
     const cornerCurvature=upcomingCurvature(c,car.progress)
     const cornerSpeedLimit=cornerCurvature>.0001?Math.sqrt(32*currentGrip/cornerCurvature):engine.topSpeed
