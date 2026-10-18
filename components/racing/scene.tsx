@@ -226,7 +226,6 @@ function Scene({ team = 0, number = 1, race, c, setup, keys, onUpdate }: ScenePr
       const player = race.cars[0]
       const pxPerMeter = race.camera ? 2.9 : 3.8
       const playerY = height * .67
-      const cs = Math.cos(player.heading), sn = Math.sin(player.heading)
       ctx.setTransform(ratio, 0, 0, ratio, 0, 0)
       const ground = ctx.createLinearGradient(0, 0, 0, height)
       ground.addColorStop(0, visual.sky); ground.addColorStop(.42, visual.ground); ground.addColorStop(1, visual.ground)
@@ -235,10 +234,9 @@ function Scene({ team = 0, number = 1, race, c, setup, keys, onUpdate }: ScenePr
       haze.addColorStop(0, night ? '#13202c12' : '#f8f0d018'); haze.addColorStop(1, night ? '#03081360' : '#17241d35')
       ctx.fillStyle = haze; ctx.fillRect(0, 0, width, height)
 
-      const a = cs * pxPerMeter, b = -sn * pxPerMeter, cc = -sn * pxPerMeter, d = -cs * pxPerMeter
-      const e = width / 2 - (player.x * cs - player.z * sn) * pxPerMeter
-      const f = playerY + (player.x * sn + player.z * cs) * pxPerMeter
-      ctx.setTransform(ratio * a, ratio * b, ratio * cc, ratio * d, ratio * e, ratio * f)
+      // Keep a fixed north-up overhead camera. Only the view center follows
+      // the player, so left and right stay consistent with the screen.
+      ctx.setTransform(ratio * pxPerMeter, 0, 0, -ratio * pxPerMeter, ratio * (width / 2 - player.x * pxPerMeter), ratio * (playerY + player.z * pxPerMeter))
       drawScenery(ctx, scenery, night)
       // The 2D ribbon follows the GPS-derived centerline of the selected venue.
       traceCircuit(ctx, c)
@@ -293,9 +291,9 @@ function Scene({ team = 0, number = 1, race, c, setup, keys, onUpdate }: ScenePr
         const car = race.cars[i]
         if (car.finish) continue
         const dx = car.x - player.x, dz = car.z - player.z
-        const x = width / 2 + (dx * cs - dz * sn) * pxPerMeter
-        const y = playerY - (dx * sn + dz * cs) * pxPerMeter
-        const angle = Math.atan2(Math.sin(car.heading - player.heading), Math.cos(car.heading - player.heading))
+        const x = width / 2 + dx * pxPerMeter
+        const y = playerY - dz * pxPerMeter
+        const angle = car.heading
         drawCar(ctx, x, y, angle, pxPerMeter * .93, car.color, i === 0 ? teams[setup.team].accent : '#f1e9d4', i === 0 ? number : i + 1, i === 0, i === 0 ? ({ soft: '#e94b4d', medium: '#e2bf47', hard: '#d9dfe4' } as const)[car.tyre] : '#21252a')
       }
 
