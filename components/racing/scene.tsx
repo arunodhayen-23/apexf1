@@ -221,9 +221,15 @@ function Scene({ team = 0, number = 1, race, c, setup, keys, onUpdate }: ScenePr
       const playerY = height * .76
       const focal = height * (race.camera ? .72 : .88)
       const cameraHeight = (playerY - horizon) * cameraDistance / focal
-      const cameraX = player.x - Math.sin(player.heading) * cameraDistance
-      const cameraZ = player.z - Math.cos(player.heading) * cameraDistance
-      const project: Projector = (x, z) => projectPoint(x, z, cameraX, cameraZ, player.heading, focal, cameraHeight, horizon, width)
+      const routePose = pose(c, player.progress)
+      const headingError = Math.atan2(Math.sin(player.heading - routePose.heading), Math.cos(player.heading - routePose.heading))
+      // Keep the chase camera aligned to the circuit's forward direction. A
+      // small allowance follows steering, while avoiding spins/off-track
+      // headings that can turn the road out of view.
+      const cameraHeading = routePose.heading + Math.max(-.32, Math.min(.32, headingError))
+      const cameraX = routePose.x - Math.sin(cameraHeading) * cameraDistance
+      const cameraZ = routePose.z - Math.cos(cameraHeading) * cameraDistance
+      const project: Projector = (x, z) => projectPoint(x, z, cameraX, cameraZ, cameraHeading, focal, cameraHeight, horizon, width)
       ctx.setTransform(ratio, 0, 0, ratio, 0, 0)
       const sky = ctx.createLinearGradient(0, 0, 0, horizon * 1.5)
       sky.addColorStop(0, visual.sky); sky.addColorStop(1, visual.ground)
@@ -266,7 +272,7 @@ function Scene({ team = 0, number = 1, race, c, setup, keys, onUpdate }: ScenePr
       for (const { car, index, point } of nearbyCars) {
         if (point.y < horizon - 20 || point.y > height + 110 || point.x < -width * .3 || point.x > width * 1.3) continue
         const scale = Math.min(38, focal / point.depth * .72)
-        const relativeHeading = Math.atan2(Math.sin(car.heading - player.heading), Math.cos(car.heading - player.heading))
+        const relativeHeading = Math.atan2(Math.sin(car.heading - cameraHeading), Math.cos(car.heading - cameraHeading))
         drawCar(ctx, point.x, point.y, relativeHeading, scale, car.color, index === 0 ? teams[setup.team].accent : '#f1e9d4', index === 0 ? number : index + 1, index === 0, index === 0 ? ({ soft: '#e94b4d', medium: '#e2bf47', hard: '#d9dfe4' } as const)[car.tyre] : '#21252a')
       }
 
