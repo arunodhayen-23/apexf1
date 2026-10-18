@@ -67,8 +67,8 @@ function RaceWorld({race,c,setup,keys,onUpdate}:{race:Race;c:Circuit;setup:Setup
   const alpha=race.paused||race.countdown>0?1:accumulator.current*60
   const rendered=race.cars.map((car,i)=>{const old=previous.current[i];let turn=Math.atan2(Math.sin(car.heading-old.heading),Math.cos(car.heading-old.heading));return{x:old.x+(car.x-old.x)*alpha,z:old.z+(car.z-old.z)*alpha,heading:old.heading+turn*alpha}})
   race.cars.forEach((car,i)=>{const g=cars.current[i],pose=rendered[i];if(g){g.visible=i===0||!car.finish;g.position.set(pose.x,0,pose.z);g.rotation.y=pose.heading}})
-  const p=rendered[0], distance=race.camera?-.45:9
-  target.set(p.x-Math.sin(p.heading)*distance,race.camera?1.35:4.3,p.z-Math.cos(p.heading)*distance)
+  const p=rendered[0], distance=race.camera?15:9
+  target.set(p.x-Math.sin(p.heading)*distance,race.camera?5.5:4.3,p.z-Math.cos(p.heading)*distance)
   camera.position.lerp(target,1-Math.exp(-delta*12));look.set(p.x+Math.sin(p.heading)*18,1,p.z+Math.cos(p.heading)*18);camera.lookAt(look)
   timer.current+=delta;if(timer.current>.1&&mounted.current){onUpdate();timer.current=0}
  })
