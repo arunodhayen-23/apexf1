@@ -72,7 +72,7 @@ function RaceWorld({race,c,setup,keys,onUpdate}:{race:Race;c:Circuit;setup:Setup
   camera.position.lerp(target,1-Math.exp(-delta*12));look.set(p.x+Math.sin(p.heading)*18,1,p.z+Math.cos(p.heading)*18);camera.lookAt(look)
   timer.current+=delta;if(timer.current>.1&&mounted.current){onUpdate();timer.current=0}
  })
- return <><CircuitWorld c={c} track={setup.track} weather={setup.weather??'clear'} wetness={race.trackWetness}/>{race.cars.map((car,i)=><group key={i} ref={el=>{cars.current[i]=el}}>{i===0?<><Car color={car.color} number={drivers[setup.driver].number} accent={teams[setup.team].accent} tyreColor={({soft:'#ec4949',medium:'#e8c547',hard:'#e8edf0'} as const)[car.tyre]}/><WeatherFx weather={setup.weather??'clear'}/></>:<RivalCar color={car.color}/>}</group>)}</>
+ return <><CircuitWorld c={c} track={setup.track} weather={setup.weather??'clear'} wetness={race.trackWetness} racingLine={setup.racingLine??'late-apex'}/>{race.cars.map((car,i)=><group key={i} ref={el=>{cars.current[i]=el}}>{i===0?<><Car color={car.color} number={drivers[setup.driver].number} accent={teams[setup.team].accent} tyreColor={({soft:'#ec4949',medium:'#e8c547',hard:'#e8edf0'} as const)[car.tyre]}/><WeatherFx weather={setup.weather??'clear'}/></>:<RivalCar color={car.color}/>}</group>)}</>
 }
 class GraphicsBoundary extends Component<{children:ReactNode},{failed:boolean}>{
  state={failed:false};static getDerivedStateFromError(){return {failed:true}}
