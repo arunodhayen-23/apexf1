@@ -115,21 +115,31 @@ function trackGap(from: number, to: number, length: number) {
   if(gap< -length/2) gap+=length
   return gap
 }
+function curvatureBetween(c: Circuit, from: number, span: number) {
+  const a=pose(c,from).heading,b=pose(c,from+span).heading
+  return Math.abs(Math.atan2(Math.sin(b-a),Math.cos(b-a)))/span
+}
+function upcomingCurvature(c: Circuit, progress: number) {
+  let peak=0
+  for(const offset of [0,24,48,72,96])peak=Math.max(peak,curvatureBetween(c,progress+offset,24))
+  return peak
+}
 function slipstreamStrength(car: Racer, race: Race, circuit: Circuit, bend: number) {
-  if(bend>.22) return 0
+  if(bend>.58) return 0
   let strongest=0
   const sin=Math.sin(car.heading),cos=Math.cos(car.heading)
   for(const other of race.cars) {
     if(other===car||other.finish) continue
     const gap=trackGap(car.progress,other.progress,circuit.length)
-    if(gap<5||gap>52) continue
+    if(gap<2||gap>78) continue
     const dx=other.x-car.x,dz=other.z-car.z
     const forward=dx*sin+dz*cos
     const lateral=Math.abs(dx*cos-dz*sin)
-    if(forward<0||forward>52||lateral>5.8) continue
-    const distanceFactor=Math.min(1,(52-gap)/32)
-    const laneFactor=Math.max(0,1-lateral/5.8)
-    strongest=Math.max(strongest,distanceFactor*laneFactor)
+    if(forward<0||forward>80||lateral>10.5) continue
+    const distanceFactor=Math.min(1,(78-gap)/45)
+    const laneFactor=Math.max(0,1-lateral/10.5)
+    const cornerFactor=Math.max(.3,1-bend*.85)
+    strongest=Math.max(strongest,distanceFactor*laneFactor*cornerFactor)
   }
   return strongest
 }
@@ -176,9 +186,9 @@ export function step(r: Race,c: Circuit,setup: Setup,keys: Set<string>,dt: numbe
       const engine=engineSpecs[setup.engine??'v10']
       const activeZone=drsZonesForTrack(setup.track).some(zone=>{const d=((car.progress%c.length)+c.length)%c.length;return d>=zone.start*c.length&&d<=zone.end*c.length})
       const drsAvailable=activeZone&&car.drsEligibleUntil>=car.progress&&r.trackWetness<=.2
-      let target=(70+setup.difficulty*7)*car.pace*form*(1+tow*.13)*(1-r.trackWetness*.2)/(1+bend*3.1)
+      let target=(70+setup.difficulty*7)*car.pace*form*(1+tow*.18)*(1-r.trackWetness*.2)/(1+bend*3.1)
       if(drsAvailable)target+=7
-      target=Math.min(target,engine.topSpeed+(drsAvailable?8:0))
+      target=Math.min(target,engine.topSpeed+(drsAvailable?8:0)+tow*7)
       car.drsOpen=drsAvailable
       if(r.time < car.mistakeUntil) target *= setup.difficulty===0?.68:.84
       if(ahead&&Math.abs(car.lane-ahead.lane)<3.8){const safeGap=6.2+Math.max(0,car.speed-ahead.speed)*.42;if(gap<safeGap+8)target=Math.min(target,Math.max(0,ahead.speed+(gap-safeGap)*.55))}
@@ -234,11 +244,14 @@ export function step(r: Race,c: Circuit,setup: Setup,keys: Set<string>,dt: numbe
     for(const rival of r.cars.slice(1)){
       if(rival.finish)continue
       const dx=rival.x-car.x,dz=rival.z-car.z,forward=dx*Math.sin(car.heading)+dz*Math.cos(car.heading),lateral=Math.abs(dx*Math.cos(car.heading)-dz*Math.sin(car.heading))
-      if(forward>0&&forward<Math.max(24,car.speed*.75)&&lateral<3.1){const safeGap=5.8;trafficSpeedCap=Math.min(trafficSpeedCap,Math.sqrt(rival.speed*rival.speed+2*36*(Math.max(0,forward-safeGap))))}
+      if(forward>0&&forward<Math.max(24,car.speed*.75)&&lateral<2.7){const safeGap=5.8;trafficSpeedCap=Math.min(trafficSpeedCap,Math.sqrt(rival.speed*rival.speed+2*36*(Math.max(0,forward-safeGap))))}
     }
-    const drag=drsOpen?.00105:tow>.08?.0013:.0017
-    let nextSpeed=Math.max(0,Math.min(engine.topSpeed+(drsOpen?8:0),car.speed+(accelerate?engine.acceleration*currentGrip*(1+tow*.28): -3)*dt-(brake?42*(1-r.trackWetness*.2)*dt:0)-car.speed*car.speed*drag*dt))
+    const drag=drsOpen?.00105:tow>.08?.00095:.0017
+    let nextSpeed=Math.max(0,Math.min(engine.topSpeed+(drsOpen?8:0)+tow*7,car.speed+(accelerate?engine.acceleration*currentGrip*(1+tow*.48): -3)*dt-(brake?42*(1-r.trackWetness*.2)*dt:0)-car.speed*car.speed*drag*dt))
     if(Number.isFinite(trafficSpeedCap)&&nextSpeed>trafficSpeedCap)nextSpeed=Math.max(trafficSpeedCap,car.speed-42*(1-r.trackWetness*.2)*dt)
+    const cornerCurvature=upcomingCurvature(c,car.progress)
+    const cornerSpeedLimit=cornerCurvature>.0001?Math.sqrt(32*currentGrip/cornerCurvature):engine.topSpeed
+    if(nextSpeed>cornerSpeedLimit)nextSpeed=Math.max(cornerSpeedLimit,car.speed-(curvatureBetween(c,car.progress,24)>.008?54:32)*dt)
     car.speed=nextSpeed
     car.heading+=steer*dt*1.88*Math.min(car.speed/12,1)/(1+car.speed/92)
     car.x+=Math.sin(car.heading)*car.speed*dt; car.z+=Math.cos(car.heading)*car.speed*dt
@@ -256,18 +269,15 @@ export function step(r: Race,c: Circuit,setup: Setup,keys: Set<string>,dt: numbe
     updateDRS(car,previousProgress,r,setup.track,c.length)
     if(!steer&&distance<c.width/2) {const tangent=pose(c,index/sampleCount*c.length).heading;const correction=Math.atan2(Math.sin(tangent-car.heading),Math.cos(tangent-car.heading));car.heading+=correction*Math.min(1,dt*(.6+r.trackWetness*.35))}
   })
-  const softened=new Set<Racer>()
   for(let pass=0;pass<24;pass++)for(let i=0;i<r.cars.length;i++)for(let j=i+1;j<r.cars.length;j++){
     const a=r.cars[i],b=r.cars[j]
     if(a.finish||b.finish)continue
-    const dx=b.x-a.x,dz=b.z-a.z,dist=Math.hypot(dx,dz),minimum=5.4
-    if(dist>=minimum)continue
+    const dx=b.x-a.x,dz=b.z-a.z
     const headingDelta=Math.atan2(Math.sin(b.heading-a.heading),Math.cos(b.heading-a.heading)),heading=a.heading+headingDelta*.5
-    const lateral=Math.abs(dx*Math.cos(heading)-dz*Math.sin(heading))
-    const aBehind=trackGap(a.progress,b.progress,c.length)>0,behind=aBehind?a:b,front=aBehind?b:a
-    const angle=(i*31+j*17)*2.399963229728653,ux=dist>.001?dx/dist:Math.cos(angle),uz=dist>.001?dz/dist:Math.sin(angle),push=minimum-dist+.025
-    a.x-=ux*push*.5;a.z-=uz*push*.5;b.x+=ux*push*.5;b.z+=uz*push*.5
-    if(lateral<2.9&&!softened.has(behind)){behind.speed=Math.min(behind.speed,front.speed*.88);softened.add(behind)}
+    const longitudinal=Math.abs(dx*Math.sin(heading)+dz*Math.cos(heading)),signedLateral=dx*Math.cos(heading)-dz*Math.sin(heading),minimumLateral=2.85
+    if(longitudinal>=5||Math.abs(signedLateral)>=minimumLateral)continue
+    const side=Math.sign(signedLateral)||((i+j)%2?1:-1),push=minimumLateral-Math.abs(signedLateral)+.025,sideX=Math.cos(heading)*side,sideZ=-Math.sin(heading)*side
+    a.x-=sideX*push*.5;a.z-=sideZ*push*.5;b.x+=sideX*push*.5;b.z+=sideZ*push*.5
   }
   if(r.cars[0].finish) r.finished=true
 }
