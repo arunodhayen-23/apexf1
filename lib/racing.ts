@@ -16,13 +16,7 @@ export const teams = [
 export type Weather = 'clear' | 'cloudy' | 'rain' | 'heavy-rain'
 export type TrackCondition = 'dry' | 'damp' | 'wet'
 export type EngineType = 'v8' | 'v10'
-export type RacingLine = 'late-apex' | 'geometric' | 'early-apex'
-export const racingLineSpecs: Record<RacingLine, { label: string; color: string; cue: string }> = {
-  'late-apex': { label: 'LATE APEX', color: '#38e39a', cue: 'Brake straight · turn in late · unwind and accelerate' },
-  geometric: { label: 'GEOMETRIC', color: '#42a5ff', cue: 'Carry a smooth, constant arc through the corner' },
-  'early-apex': { label: 'EARLY APEX', color: '#ff6657', cue: 'Turn in early · avoid running wide on exit' },
-}
-export type Setup = { track: number; driver: number; team: number; laps: number; difficulty: number; engine?: EngineType; weather?: Weather; trackCondition?: TrackCondition; racingLine?: RacingLine }
+export type Setup = { track: number; driver: number; team: number; laps: number; difficulty: number; engine?: EngineType; weather?: Weather; trackCondition?: TrackCondition }
 export const engineSpecs: Record<EngineType, { label: string; topSpeed: number; acceleration: number; peakRpm: number }> = {
   v8: { label: 'V8', topSpeed: 86, acceleration: 25, peakRpm: 18000 },
   v10: { label: 'V10', topSpeed: 90, acceleration: 23, peakRpm: 19500 },

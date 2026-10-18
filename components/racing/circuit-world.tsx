@@ -3,7 +3,7 @@
 import { Sky } from '@react-three/drei'
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
-import { pose, racingLineSpecs, tracks, type Circuit, type RacingLine, type Weather } from '@/lib/racing'
+import { pose, tracks, type Circuit, type Weather } from '@/lib/racing'
 import { circuitVisual } from '@/lib/circuit-visuals'
 
 type Placement = { x: number; y: number; z: number; heading?: number; scale: [number, number, number]; color: string }
@@ -65,59 +65,6 @@ function TrackSurface({ c, visual, wetness }: { c: Circuit; visual: ReturnType<t
   const night=visual.daypart!=='day'
   return <mesh geometry={geometry} receiveShadow><meshStandardMaterial attach="material-0" map={texture} vertexColors color={new THREE.Color(1-wetness*.19,1-wetness*.12,1-wetness*.08)} emissive={night?'#9dcfff':'#000000'} emissiveIntensity={night?.42:0} roughness={.96-wetness*.53} metalness={wetness*.12} side={THREE.DoubleSide} polygonOffset polygonOffsetFactor={-2} polygonOffsetUnits={-2} /><meshStandardMaterial attach="material-1" vertexColors roughness={.9} side={THREE.DoubleSide} polygonOffset polygonOffsetFactor={-2} polygonOffsetUnits={-2} /></mesh>
 }
-const lineStyles: RacingLine[] = ['late-apex', 'geometric', 'early-apex']
-function wrapAngle(angle: number) { return Math.atan2(Math.sin(angle), Math.cos(angle)) }
-type RacingCorner = { start: number; span: number; sign: number }
-function findRacingCorners(c: Circuit): RacingCorner[] {
-  const count=c.samples.length, spacing=c.length/count, heading=c.samples.map((point,index)=>{
-    const before=c.samples[(index-1+count)%count],after=c.samples[(index+1)%count]
-    return Math.atan2(after.x-before.x,after.z-before.z)
-  })
-  const bend=heading.map((_,index)=>wrapAngle(heading[(index+24)%count]-heading[(index-24+count)%count]))
-  const active=bend.map(value=>Math.abs(value)>.045)
-  const inactive=active.indexOf(false)
-  if(inactive<0)return []
-  const corners:RacingCorner[]=[]
-  let start=-1
-  for(let step=1;step<=count;step++){
-    const cursor=inactive+step,index=cursor%count
-    if(active[index]&&start<0)start=cursor
-    if((!active[index]||step===count)&&start>=0){
-      const span=(cursor-start)*spacing
-      let turn=0
-      for(let bendCursor=start;bendCursor<cursor;bendCursor++)turn+=bend[bendCursor%count]
-      if(span>18&&Math.abs(turn)>.12)corners.push({start:(((start*spacing-20)%c.length)+c.length)%c.length,span:span+44,sign:Math.sign(turn)})
-      start=-1
-    }
-  }
-  return corners
-}
-function lineOffset(c: Circuit, distance: number, style: RacingLine, corners: RacingCorner[]) {
-  const normalized=((distance%c.length)+c.length)%c.length
-  for(const corner of corners){
-    const relative=((normalized-corner.start+c.length)%c.length)
-    if(relative>corner.span)continue
-    const u=relative/corner.span, apex=style==='late-apex'?.68:style==='early-apex'?.4:.53, outside=-corner.sign*4.4, inside=corner.sign*4.4
-    const anchors:[[number,number],[number,number],[number,number],[number,number],[number,number],[number,number]]=[[0,0],[.2,0],[.34,outside],[apex,inside],[.9,outside],[1,0]]
-    for(let i=1;i<anchors.length;i++)if(u<=anchors[i][0]){
-      const [fromU,fromOffset]=anchors[i-1],[toU,toOffset]=anchors[i],t=(u-fromU)/(toU-fromU)
-      return fromOffset+(toOffset-fromOffset)*t
-    }
-  }
-  return 0
-}
-function RacingLines({ c, active }: { c: Circuit; active: RacingLine }) {
-  const geometries=useMemo(()=>{
-    const corners=findRacingCorners(c)
-    return lineStyles.map(style=>{
-    const points=c.samples.map((_,index)=>{const distance=index/c.samples.length*c.length,offset=lineOffset(c,distance,style,corners),p=pose(c,distance,offset);return new THREE.Vector3(p.x,.14,p.z)})
-    const curve=new THREE.CatmullRomCurve3(points,true,'centripetal')
-    return {style,geometry:new THREE.TubeGeometry(curve,c.samples.length,.11,4,true)}
-    })
-  },[c])
-  useEffect(()=>()=>geometries.forEach(({geometry})=>geometry.dispose()),[geometries])
-  return <>{geometries.map(({style,geometry})=><mesh key={style} geometry={geometry} renderOrder={2}><meshBasicMaterial color={racingLineSpecs[style].color} transparent opacity={style===active?.95:.38} toneMapped={false} depthWrite={false}/></mesh>)}</>
-}
 function PitLane({ c }: { c: Circuit }) {
   const geometry=useMemo(()=>{
     const positions:number[]=[],indices:number[]=[],count=c.samples.length,offset=-(c.width/2+3.5),halfWidth=2.5
@@ -146,7 +93,7 @@ function Floodlights({ c, color }: { c: Circuit; color: string }) {
   const positions=useMemo(()=>Array.from({length:stations},(_,i)=>pose(c,(i+.35)/stations*c.length)),[c,stations])
   return <>{positions.map((p,i)=><pointLight key={i} position={[p.x,24,p.z]} color={color} intensity={50000} distance={280} decay={2}/>)}</>
 }
-export default function CircuitWorld({ c, track, weather, wetness, racingLine }: { c: Circuit; track: number; weather: Weather; wetness: number; racingLine: RacingLine }) {
+export default function CircuitWorld({ c, track, weather, wetness }: { c: Circuit; track: number; weather: Weather; wetness: number }) {
   const venue = tracks[track], visual=circuitVisual(venue.name), night=visual.daypart==='night', twilight=visual.daypart==='twilight'
   const desert = venue.environment === 'desert' || visual.terrain==='desert', urban = venue.environment === 'harbour' || venue.environment === 'city' || visual.terrain==='city' || visual.terrain==='stadium'
   const scenery = useMemo(() => {
@@ -205,7 +152,6 @@ export default function CircuitWorld({ c, track, weather, wetness, racingLine }:
     <directionalLight position={[80, 100, 40]} intensity={night?.16:twilight?.55:weather==='heavy-rain'?.95:weather==='rain'?1.35:weather==='cloudy'?1.8:2.5} color={night?'#8197b8':twilight?'#e4a276':desert&&weather==='clear'?'#ffdfae':'#fff6e4'} />
     <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -.05, 0]} receiveShadow><planeGeometry args={[14000, 14000]} /><meshStandardMaterial color={night?new THREE.Color(visual.ground).multiplyScalar(.28):twilight?new THREE.Color(visual.ground).multiplyScalar(.62):visual.ground} roughness={1} /></mesh>
     <TrackSurface c={c} visual={visual} wetness={wetness} />
-    <RacingLines c={c} active={racingLine} />
     {(night||twilight)&&<Floodlights c={c} color={twilight?'#d7b9ff':'#d9f0ff'}/>}
     <PitLane c={c}/>
     <Instances items={scenery.barriers} /><Instances items={scenery.trunks} /><Instances items={scenery.trees} shape="cone" /><Instances items={scenery.buildings} /><Instances items={scenery.windows} glow={night||twilight}/><Instances items={scenery.crowds} />
