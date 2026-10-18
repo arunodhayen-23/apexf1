@@ -75,73 +75,65 @@ function makeScenery(c: Circuit, trackId: number, visual: ReturnType<typeof circ
   return items
 }
 
-function traceCircuit(ctx: CanvasRenderingContext2D, c: Circuit) {
-  ctx.beginPath()
-  c.samples.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.z) : ctx.lineTo(p.x, p.z))
-  ctx.closePath()
+type ScreenPoint = { x: number; y: number; depth: number }
+type Projector = (x: number, z: number) => ScreenPoint | null
+
+function projectPoint(x: number, z: number, cameraX: number, cameraZ: number, heading: number, focal: number, cameraHeight: number, horizon: number, width: number): ScreenPoint | null {
+  const dx = x - cameraX, dz = z - cameraZ
+  const depth = dx * Math.sin(heading) + dz * Math.cos(heading)
+  if (depth <= 2) return null
+  const lateral = dx * Math.cos(heading) - dz * Math.sin(heading)
+  return { x: width / 2 + lateral * focal / depth, y: horizon + cameraHeight * focal / depth, depth }
 }
 
-function traceEdge(ctx: CanvasRenderingContext2D, c: Circuit, side: number, offset: number) {
-  ctx.beginPath()
-  const count = c.samples.length
-  c.samples.forEach((sample, i) => {
-    const prev = c.samples[(i + count - 1) % count], next = c.samples[(i + 1) % count]
-    const heading = Math.atan2(next.x - prev.x, next.z - prev.z)
-    const x = sample.x + Math.cos(heading) * side * offset
-    const z = sample.z - Math.sin(heading) * side * offset
-    if (i === 0) ctx.moveTo(x, z)
-    else ctx.lineTo(x, z)
-  })
-  ctx.closePath()
+function ribbon(ctx: CanvasRenderingContext2D, project: Projector, c: Circuit, from: number, to: number, halfWidth: number, color: string) {
+  const aL = pose(c, from, -halfWidth), aR = pose(c, from, halfWidth)
+  const bL = pose(c, to, -halfWidth), bR = pose(c, to, halfWidth)
+  const p1 = project(aL.x, aL.z), p2 = project(aR.x, aR.z), p3 = project(bR.x, bR.z), p4 = project(bL.x, bL.z)
+  if (!p1 || !p2 || !p3 || !p4) return
+  ctx.fillStyle = color
+  ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.lineTo(p4.x, p4.y); ctx.closePath(); ctx.fill()
 }
 
-function drawScenery(ctx: CanvasRenderingContext2D, items: Scenery[], night: boolean) {
-  for (const item of items) {
+function ribbonBand(ctx: CanvasRenderingContext2D, project: Projector, c: Circuit, from: number, to: number, offsetA: number, offsetB: number, color: string) {
+  const a = pose(c, from, offsetA), b = pose(c, from, offsetB)
+  const c1 = pose(c, to, offsetB), d = pose(c, to, offsetA)
+  const p1 = project(a.x, a.z), p2 = project(b.x, b.z), p3 = project(c1.x, c1.z), p4 = project(d.x, d.z)
+  if (!p1 || !p2 || !p3 || !p4) return
+  ctx.fillStyle = color
+  ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.lineTo(p4.x, p4.y); ctx.closePath(); ctx.fill()
+}
+
+function drawProjectedScenery(ctx: CanvasRenderingContext2D, items: Scenery[], project: Projector, night: boolean, width: number, height: number) {
+  const visible = items.map(item => ({ item, point: project(item.x, item.z) }))
+    .filter((entry): entry is { item: Scenery; point: ScreenPoint } => !!entry.point && entry.point.depth > 15 && entry.point.depth < 340 && entry.point.x > -width * .35 && entry.point.x < width * 1.35)
+    .sort((a, b) => b.point.depth - a.point.depth)
+  for (const { item, point } of visible) {
+    const scale = Math.min(22, 720 / point.depth)
+    const w = Math.max(2, item.size * scale), h = Math.max(2, item.depth * scale * .55)
     ctx.save()
-    ctx.translate(item.x, item.z)
-    ctx.rotate(-item.heading)
     if (item.kind === 'tree') {
-      const r = item.size * .46
-      ctx.fillStyle = '#13261c88'
-      ctx.beginPath(); ctx.ellipse(1.4, 2, r * 1.15, r * .94, 0, 0, Math.PI * 2); ctx.fill()
-      ctx.fillStyle = item.color
-      ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill()
-      ctx.fillStyle = item.accent
-      ctx.globalAlpha = .72
-      ctx.beginPath(); ctx.arc(-r * .27, -r * .22, r * .57, 0, Math.PI * 2); ctx.fill()
-    } else if (item.kind === 'building') {
-      ctx.fillStyle = '#11182066'
-      ctx.fillRect(-item.size / 2 + 2, -item.depth / 2 + 3, item.size, item.depth)
-      ctx.fillStyle = item.color
-      ctx.fillRect(-item.size / 2, -item.depth / 2, item.size, item.depth)
-      ctx.strokeStyle = '#ffffff24'; ctx.lineWidth = .65
-      ctx.strokeRect(-item.size / 2, -item.depth / 2, item.size, item.depth)
-      ctx.fillStyle = item.accent; ctx.globalAlpha = night ? .78 : .2
-      ctx.fillRect(-item.size * .31, -item.depth * .3, item.size * .17, item.depth * .12)
-      ctx.fillRect(item.size * .08, item.depth * .15, item.size * .2, item.depth * .1)
-      ctx.fillStyle = '#10161c88'; ctx.globalAlpha = 1
-      ctx.fillRect(-item.size * .38, -item.depth * .08, item.size * .76, .7)
-    } else if (item.kind === 'stand') {
-      ctx.fillStyle = '#1118205e'
-      ctx.fillRect(-item.size / 2 + 2, -item.depth / 2 + 3, item.size, item.depth)
-      ctx.fillStyle = item.color
-      ctx.fillRect(-item.size / 2, -item.depth / 2, item.size, item.depth)
-      for (let row = 0; row < 3; row++) {
-        ctx.fillStyle = row % 2 ? '#d7d1bd' : item.accent
-        ctx.globalAlpha = .7
-        ctx.fillRect(-item.size / 2 + 2, -item.depth / 2 + 2 + row * 2.1, item.size - 4, 1.2)
-      }
-      ctx.globalAlpha = 1
-    } else if (item.kind === 'dune') {
-      ctx.fillStyle = item.color; ctx.globalAlpha = .68
-      ctx.beginPath(); ctx.ellipse(0, 0, item.size * .9, item.depth * .85, .08, 0, Math.PI * 2); ctx.fill()
-      ctx.strokeStyle = item.accent; ctx.globalAlpha = .45; ctx.lineWidth = .65
-      ctx.beginPath(); ctx.ellipse(0, 0, item.size * .58, item.depth * .55, .08, .15, Math.PI * 1.65); ctx.stroke()
+      const r = Math.max(2, w * .42)
+      ctx.fillStyle = '#10191288'; ctx.beginPath(); ctx.ellipse(point.x + r * .15, point.y + r * .25, r * 1.1, r * .63, 0, 0, Math.PI * 2); ctx.fill()
+      ctx.fillStyle = item.color; ctx.beginPath(); ctx.ellipse(point.x, point.y, r, r * .7, 0, 0, Math.PI * 2); ctx.fill()
+      ctx.fillStyle = item.accent; ctx.globalAlpha = .7; ctx.beginPath(); ctx.ellipse(point.x - r * .2, point.y - r * .12, r * .56, r * .4, 0, 0, Math.PI * 2); ctx.fill()
+    } else if (item.kind === 'water' || item.kind === 'dune') {
+      ctx.globalAlpha = item.kind === 'water' ? .8 : .65; ctx.fillStyle = item.color
+      ctx.beginPath(); ctx.ellipse(point.x, point.y, w * .65, h * .62, 0, 0, Math.PI * 2); ctx.fill()
+      ctx.globalAlpha = .35; ctx.strokeStyle = item.accent; ctx.lineWidth = Math.max(1, scale * .65)
+      ctx.beginPath(); ctx.ellipse(point.x, point.y, w * .43, h * .38, 0, .15, Math.PI * 1.7); ctx.stroke()
     } else {
-      ctx.fillStyle = item.color; ctx.globalAlpha = .8
-      ctx.beginPath(); ctx.ellipse(0, 0, item.size * 1.25, item.depth * .8, 0, 0, Math.PI * 2); ctx.fill()
-      ctx.strokeStyle = item.accent; ctx.globalAlpha = .25; ctx.lineWidth = .8
-      ctx.beginPath(); ctx.ellipse(0, 0, item.size * .8, item.depth * .51, 0, 0, Math.PI * 2); ctx.stroke()
+      ctx.fillStyle = '#11182066'; ctx.fillRect(point.x - w / 2 + 2, point.y - h / 2 + 3, w, h)
+      ctx.fillStyle = item.color; ctx.fillRect(point.x - w / 2, point.y - h / 2, w, h)
+      ctx.strokeStyle = '#ffffff24'; ctx.lineWidth = Math.max(1, scale * .6); ctx.strokeRect(point.x - w / 2, point.y - h / 2, w, h)
+      if (item.kind === 'stand') {
+        ctx.fillStyle = item.accent; ctx.globalAlpha = .7
+        for (let row = 0; row < 3; row++) ctx.fillRect(point.x - w / 2 + 2, point.y - h / 2 + 2 + row * Math.max(2, h * .13), w - 4, Math.max(1, h * .07))
+      } else {
+        ctx.fillStyle = item.accent; ctx.globalAlpha = night ? .8 : .22
+        ctx.fillRect(point.x - w * .31, point.y - h * .28, Math.max(2, w * .16), Math.max(1, h * .13))
+        ctx.fillRect(point.x + w * .08, point.y + h * .12, Math.max(2, w * .2), Math.max(1, h * .1))
+      }
     }
     ctx.restore()
   }
@@ -224,77 +216,58 @@ function Scene({ team = 0, number = 1, race, c, setup, keys, onUpdate }: ScenePr
       while (accumulator >= 1 / 60) { step(race, c, setup, keys, 1 / 60); accumulator -= 1 / 60 }
 
       const player = race.cars[0]
-      const pxPerMeter = race.camera ? 2.9 : 3.8
-      const playerY = height * .67
+      const cameraDistance = 27
+      const horizon = height * .28
+      const playerY = height * .76
+      const focal = height * (race.camera ? .72 : .88)
+      const cameraHeight = (playerY - horizon) * cameraDistance / focal
+      const cameraX = player.x - Math.sin(player.heading) * cameraDistance
+      const cameraZ = player.z - Math.cos(player.heading) * cameraDistance
+      const project: Projector = (x, z) => projectPoint(x, z, cameraX, cameraZ, player.heading, focal, cameraHeight, horizon, width)
       ctx.setTransform(ratio, 0, 0, ratio, 0, 0)
-      const ground = ctx.createLinearGradient(0, 0, 0, height)
-      ground.addColorStop(0, visual.sky); ground.addColorStop(.42, visual.ground); ground.addColorStop(1, visual.ground)
-      ctx.fillStyle = ground; ctx.fillRect(0, 0, width, height)
-      const haze = ctx.createRadialGradient(width * .5, height * .57, 5, width * .5, height * .57, Math.max(width, height) * .78)
-      haze.addColorStop(0, night ? '#13202c12' : '#f8f0d018'); haze.addColorStop(1, night ? '#03081360' : '#17241d35')
-      ctx.fillStyle = haze; ctx.fillRect(0, 0, width, height)
+      const sky = ctx.createLinearGradient(0, 0, 0, horizon * 1.5)
+      sky.addColorStop(0, visual.sky); sky.addColorStop(1, visual.ground)
+      ctx.fillStyle = sky; ctx.fillRect(0, 0, width, height)
+      const ground = ctx.createLinearGradient(0, horizon, 0, height)
+      ground.addColorStop(0, visual.ground); ground.addColorStop(1, night ? '#10151a' : '#18221c')
+      ctx.fillStyle = ground; ctx.fillRect(0, horizon, width, height - horizon)
+      const haze = ctx.createLinearGradient(0, horizon - 22, 0, horizon + 55)
+      haze.addColorStop(0, `${visual.sky}00`); haze.addColorStop(.52, `${visual.sky}70`); haze.addColorStop(1, `${visual.ground}00`)
+      ctx.fillStyle = haze; ctx.fillRect(0, horizon - 22, width, 80)
 
-      // Keep a fixed north-up overhead camera. Only the view center follows
-      // the player, so left and right stay consistent with the screen.
-      ctx.setTransform(ratio * pxPerMeter, 0, 0, -ratio * pxPerMeter, ratio * (width / 2 - player.x * pxPerMeter), ratio * (playerY + player.z * pxPerMeter))
-      drawScenery(ctx, scenery, night)
-      // The 2D ribbon follows the GPS-derived centerline of the selected venue.
-      traceCircuit(ctx, c)
-      if (night) { ctx.save(); ctx.shadowColor = visual.accent; ctx.shadowBlur = 18; ctx.strokeStyle = `${visual.accent}65`; ctx.lineWidth = c.width + 20; ctx.stroke(); ctx.restore() }
-      ctx.strokeStyle = '#101519'; ctx.lineWidth = c.width + 14; ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.stroke()
-      ctx.strokeStyle = visual.runoff; ctx.lineWidth = c.width + 8; ctx.stroke()
-      for (const side of [-1, 1]) {
-        traceEdge(ctx, c, side, c.width / 2 + 1.1)
-        ctx.strokeStyle = '#ded8c8'; ctx.lineWidth = 2.4; ctx.setLineDash([4, 4]); ctx.stroke()
-      }
-      ctx.setLineDash([])
-      const barrierDistance = c.width / 2 + (tracks[setup.track].environment === 'city' || tracks[setup.track].environment === 'harbour' ? 6 : 11)
-      for (const side of [-1, 1]) {
-        traceEdge(ctx, c, side, barrierDistance)
-        ctx.strokeStyle = '#15191d'; ctx.lineWidth = 2.5; ctx.stroke()
-        traceEdge(ctx, c, side, barrierDistance)
-        ctx.strokeStyle = visual.kerbs[1]; ctx.globalAlpha = .76; ctx.lineWidth = .9; ctx.setLineDash([3.5, 3.5]); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1
-      }
-      ctx.beginPath(); c.samples.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.z) : ctx.lineTo(p.x, p.z)); ctx.closePath()
-      ctx.strokeStyle = night ? '#69737a' : '#4c5254'; ctx.lineWidth = c.width; ctx.stroke()
-      for (const side of [-1, 1]) {
-        traceEdge(ctx, c, side, c.width / 2 - 1)
-        ctx.strokeStyle = visual.kerbs[0]; ctx.lineWidth = 1.55; ctx.setLineDash([4, 4]); ctx.stroke()
-        traceEdge(ctx, c, side, c.width / 2 - 1)
-        ctx.lineDashOffset = -4; ctx.strokeStyle = visual.kerbs[1]; ctx.stroke(); ctx.lineDashOffset = 0
-      }
-      ctx.setLineDash([])
-      const pit = (distance: number) => pose(c, distance, -(c.width / 2 + 4.2))
-      ctx.beginPath()
-      for (let i = 0; i <= 90; i++) { const p = pit(c.length * (.91 + i / 90 * .09)); if (!i) ctx.moveTo(p.x, p.z); else ctx.lineTo(p.x, p.z) }
-      for (let i = 0; i <= 45; i++) { const p = pit(c.length * (i / 45 * .09)); ctx.lineTo(p.x, p.z) }
-      ctx.strokeStyle = '#242b30'; ctx.lineWidth = 5.4; ctx.lineCap = 'round'; ctx.stroke()
-      ctx.strokeStyle = '#b6bcba'; ctx.globalAlpha = .55; ctx.lineWidth = .7; ctx.setLineDash([2, 3]); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1
-      for (const zone of drsZonesForTrack(setup.track)) {
-        ctx.beginPath()
-        const start = Math.floor(zone.start * c.samples.length), end = Math.ceil(zone.end * c.samples.length)
-        for (let i = start; i <= end; i++) { const p = c.samples[i % c.samples.length]; if (i === start) ctx.moveTo(p.x, p.z); else ctx.lineTo(p.x, p.z) }
-        ctx.strokeStyle = '#64d9bd'; ctx.globalAlpha = .7; ctx.lineWidth = 1.2; ctx.setLineDash([6, 5]); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1
-      }
-      const startLeft = pose(c, 0, -c.width / 2), startRight = pose(c, 0, c.width / 2)
-      ctx.beginPath(); ctx.moveTo(startLeft.x, startLeft.z); ctx.lineTo(startRight.x, startRight.z)
-      ctx.strokeStyle = '#f5f2e8'; ctx.lineWidth = 1.3; ctx.setLineDash([1.8, 1.8]); ctx.stroke(); ctx.setLineDash([])
-      if (race.trackWetness > .08) {
-        traceCircuit(ctx, c)
-        ctx.strokeStyle = `rgba(142,197,218,${.12 + race.trackWetness * .13})`; ctx.lineWidth = c.width * .72; ctx.lineCap = 'round'; ctx.stroke()
+      // Follow behind the car and rotate the flat GPS ribbon into the direction
+      // of travel. The familiar chase view uses perspective projection only;
+      // the track itself remains a flat 2D drawing.
+      drawProjectedScenery(ctx, scenery, project, night, width, height)
+      const segment = 3.2
+      const drsZones = drsZonesForTrack(setup.track)
+      for (let distance = 355; distance > -16; distance -= segment) {
+        const next = Math.min(355, distance + segment)
+        const midpoint = ((player.progress + distance + segment / 2) / c.length % 1 + 1) % 1
+        ribbon(ctx, project, c, distance, next, c.width / 2 + 10, '#171b1b')
+        ribbon(ctx, project, c, distance, next, c.width / 2 + 5, visual.runoff)
+        ribbon(ctx, project, c, distance, next, c.width / 2, night ? '#303538' : '#3b3f3d')
+        const inner = c.width / 2 - 1.65
+        const kerbColor = Math.floor(distance / 9) % 2 ? visual.kerbs[0] : visual.kerbs[1]
+        ribbonBand(ctx, project, c, distance, next, inner, c.width / 2, kerbColor)
+        ribbonBand(ctx, project, c, distance, next, -c.width / 2, -inner, kerbColor)
+        if (Math.abs(Math.round(distance / 18) * 18 - distance) < segment * .55) ribbon(ctx, project, c, distance, next, .12, '#d9d9ce')
+        if (drsZones.some(zone => midpoint >= zone.start && midpoint <= zone.end)) ribbon(ctx, project, c, distance, next, .46, '#64d9bd')
+        if (race.trackWetness > .08) {
+          ctx.globalAlpha = .08 + race.trackWetness * .13
+          ribbon(ctx, project, c, distance, next, c.width * .32, '#9dcce0')
+          ctx.globalAlpha = 1
+        }
       }
 
-      // Cars are drawn as crisp top-down sprites; the original simulation
-      // coordinates preserve safe spacing while the player sees the whole lane.
-      ctx.setTransform(ratio, 0, 0, ratio, 0, 0)
-      for (let i = race.cars.length - 1; i >= 0; i--) {
-        const car = race.cars[i]
-        if (car.finish) continue
-        const dx = car.x - player.x, dz = car.z - player.z
-        const x = width / 2 + dx * pxPerMeter
-        const y = playerY - dz * pxPerMeter
-        const angle = car.heading
-        drawCar(ctx, x, y, angle, pxPerMeter * .93, car.color, i === 0 ? teams[setup.team].accent : '#f1e9d4', i === 0 ? number : i + 1, i === 0, i === 0 ? ({ soft: '#e94b4d', medium: '#e2bf47', hard: '#d9dfe4' } as const)[car.tyre] : '#21252a')
+      const nearbyCars = race.cars.map((car, index) => ({ car, index, point: project(car.x, car.z) }))
+        .filter((entry): entry is { car: typeof player; index: number; point: ScreenPoint } => !!entry.point && !entry.car.finish && entry.point.depth > 4 && entry.point.depth < 380)
+        .sort((a, b) => b.point.depth - a.point.depth)
+      for (const { car, index, point } of nearbyCars) {
+        if (point.y < horizon - 20 || point.y > height + 110 || point.x < -width * .3 || point.x > width * 1.3) continue
+        const scale = Math.min(38, focal / point.depth * .72)
+        const relativeHeading = Math.atan2(Math.sin(car.heading - player.heading), Math.cos(car.heading - player.heading))
+        drawCar(ctx, point.x, point.y, relativeHeading, scale, car.color, index === 0 ? teams[setup.team].accent : '#f1e9d4', index === 0 ? number : index + 1, index === 0, index === 0 ? ({ soft: '#e94b4d', medium: '#e2bf47', hard: '#d9dfe4' } as const)[car.tyre] : '#21252a')
       }
 
       if (setup.weather === 'rain' || setup.weather === 'heavy-rain') {
@@ -308,8 +281,8 @@ function Scene({ team = 0, number = 1, race, c, setup, keys, onUpdate }: ScenePr
         ctx.globalAlpha = 1
       }
       if (night) {
-        const light = ctx.createRadialGradient(width / 2, playerY - 35, 5, width / 2, playerY - 35, Math.max(width, height) * .46)
-        light.addColorStop(0, `${visual.accent}0a`); light.addColorStop(1, '#03081144')
+        const light = ctx.createRadialGradient(width / 2, playerY - 90, 4, width / 2, playerY - 90, Math.max(width, height) * .52)
+        light.addColorStop(0, `${visual.accent}1c`); light.addColorStop(.45, `${visual.accent}09`); light.addColorStop(1, '#03081155')
         ctx.fillStyle = light; ctx.fillRect(0, 0, width, height)
       }
 
@@ -320,7 +293,7 @@ function Scene({ team = 0, number = 1, race, c, setup, keys, onUpdate }: ScenePr
     return () => { cancelAnimationFrame(frame); observer.disconnect() }
   }, [race, c, setup, keys, onUpdate, team, number, scenery])
 
-  return <canvas ref={canvasRef} className="race-canvas-2d" aria-label={race ? `${tracks[setup?.track ?? 0].name} top-down race view` : 'Top-down race car preview'} />
+  return <canvas ref={canvasRef} className="race-canvas-2d" aria-label={race ? `${tracks[setup?.track ?? 0].name} behind-the-car race view` : 'Racing car preview'} />
 }
 
 export default memo(Scene)
