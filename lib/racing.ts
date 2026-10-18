@@ -176,11 +176,26 @@ export function step(r: Race,c: Circuit,setup: Setup,keys: Set<string>,dt: numbe
         car.nextEvent = r.time + 18 + (1 + Math.cos(car.phase + r.time)) * 18
       }
       const form = 1 + Math.sin(r.time * .19 + car.phase) * car.consistency
-      const traffic=r.cars.map(other=>({other,gap:other===car?Infinity:trackGap(car.progress,other.progress,c.length)})).filter(item=>item.gap>0&&item.gap<52).sort((a,b)=>a.gap-b.gap)
-      const ahead=traffic[0]?.other, gap=traffic[0]?.gap??Infinity
+      const nearby=r.cars.map(other=>({other,gap:other===car?Infinity:trackGap(car.progress,other.progress,c.length)})).filter(item=>Math.abs(item.gap)<52)
+      const traffic=nearby.filter(item=>item.gap>0).sort((a,b)=>a.gap-b.gap)
       const preferredLane=(i%2?-3:3)
-      const passingLane=ahead&&bend<.28?(gap>5?(ahead.lane>=0?-4:4):car.lane):preferredLane
-      car.lane+=(passingLane-car.lane)*Math.min(1,dt*1.05)
+      const blocking=traffic.find(item=>item.gap<48&&Math.abs(car.lane-item.other.lane)<3.8)
+      let passingLane=preferredLane
+      if(blocking&&bend<.45) {
+        const laneLimit=Math.max(2.5,c.width/2-1.8)
+        const candidates=[-5,-1.7,1.7,5].filter(lane=>Math.abs(lane)<=laneLimit)
+        const open=candidates.filter(lane=>nearby.every(item=>Math.abs(item.gap)>13||Math.abs(lane-item.other.lane)>3.5))
+        if(open.length) {
+          passingLane=open.sort((a,b)=>{
+            const cost=(lane:number)=>Math.abs(lane-car.lane)*.32+nearby.reduce((total,item)=>{
+              const proximity=Math.max(0,1-Math.abs(item.gap)/52)
+              return total+proximity*Math.max(0,5.2-Math.abs(lane-item.other.lane))
+            },0)
+            return cost(a)-cost(b)
+          })[0]
+        } else passingLane=car.lane
+      }
+      car.lane+=(passingLane-car.lane)*Math.min(1,dt*2.4)
       const tow=slipstreamStrength(car,r,c,bend)
       car.inSlipstream=tow>.08
       const engine=engineSpecs[setup.engine??'v10']
@@ -191,7 +206,11 @@ export function step(r: Race,c: Circuit,setup: Setup,keys: Set<string>,dt: numbe
       target=Math.min(target,engine.topSpeed+(drsAvailable?8:0)+tow*7)
       car.drsOpen=drsAvailable
       if(r.time < car.mistakeUntil) target *= setup.difficulty===0?.68:.84
-      if(ahead&&Math.abs(car.lane-ahead.lane)<3.8){const safeGap=6.2+Math.max(0,car.speed-ahead.speed)*.42;if(gap<safeGap+8)target=Math.min(target,Math.max(0,ahead.speed+(gap-safeGap)*.55))}
+      const aiGrip=tyreSpecs[car.tyre].grip*(1-car.tyreWear*.32)*(1-r.trackWetness*.42)
+      const aiCurvature=upcomingCurvature(c,car.progress)
+      const aiCornerLimit=aiCurvature>.0001?Math.sqrt(32*aiGrip/aiCurvature):engine.topSpeed
+      target=Math.min(target,aiCornerLimit)
+      if(blocking&&Math.abs(car.lane-blocking.other.lane)<3.8){const safeGap=8.5+Math.max(0,car.speed-blocking.other.speed)*.48;if(blocking.gap<safeGap+9)target=Math.min(target,Math.max(0,blocking.other.speed+(blocking.gap-safeGap)*.9))}
       const speedDelta=target-car.speed
       const speedChangeLimit=(speedDelta>=0?engine.acceleration*(1-r.trackWetness*.42):42*(1-r.trackWetness*.2))*dt
       car.speed+=Math.sign(speedDelta)*Math.min(Math.abs(speedDelta),speedChangeLimit)
@@ -245,10 +264,11 @@ export function step(r: Race,c: Circuit,setup: Setup,keys: Set<string>,dt: numbe
     for(const rival of r.cars.slice(1)){
       if(rival.finish)continue
       const dx=rival.x-car.x,dz=rival.z-car.z,forward=dx*Math.sin(car.heading)+dz*Math.cos(car.heading),lateral=Math.abs(dx*Math.cos(car.heading)-dz*Math.sin(car.heading))
-      if(forward>0&&forward<Math.max(24,car.speed*.75)&&lateral<2.7){const safeGap=5.8;trafficSpeedCap=Math.min(trafficSpeedCap,Math.sqrt(rival.speed*rival.speed+2*36*(Math.max(0,forward-safeGap))))}
+      if(forward>0&&forward<Math.max(26,car.speed*.8)&&lateral<3.2){const safeGap=8;trafficSpeedCap=Math.min(trafficSpeedCap,Math.sqrt(rival.speed*rival.speed+2*36*(Math.max(0,forward-safeGap))))}
     }
     const drag=drsOpen?.00105:tow>.08?.00095:.0017
-    let nextSpeed=Math.max(0,Math.min(engine.topSpeed+(drsOpen?8:0)+tow*7,car.speed+(accelerate?engine.acceleration*currentGrip*(1+tow*.48): -3)*dt-(brake?42*(1-r.trackWetness*.2)*dt:0)-car.speed*car.speed*drag*dt))
+    const launchBoost=accelerate&&r.time<3&&car.speed<32?1.22:1
+    let nextSpeed=Math.max(0,Math.min(engine.topSpeed+(drsOpen?8:0)+tow*7,car.speed+(accelerate?engine.acceleration*currentGrip*(1+tow*.48)*launchBoost: -3)*dt-(brake?42*(1-r.trackWetness*.2)*dt:0)-car.speed*car.speed*drag*dt))
     if(Number.isFinite(trafficSpeedCap)&&nextSpeed>trafficSpeedCap)nextSpeed=Math.max(trafficSpeedCap,car.speed-42*(1-r.trackWetness*.2)*dt)
     const cornerCurvature=upcomingCurvature(c,car.progress)
     const cornerSpeedLimit=cornerCurvature>.0001?Math.sqrt(32*currentGrip/cornerCurvature):engine.topSpeed
@@ -270,16 +290,6 @@ export function step(r: Race,c: Circuit,setup: Setup,keys: Set<string>,dt: numbe
     updateDRS(car,previousProgress,r,setup.track,c.length)
     if(!steer&&distance<c.width/2) {const tangent=pose(c,index/sampleCount*c.length).heading;const correction=Math.atan2(Math.sin(tangent-car.heading),Math.cos(tangent-car.heading));car.heading+=correction*Math.min(1,dt*(.6+r.trackWetness*.35))}
   })
-  for(let pass=0;pass<24;pass++)for(let i=0;i<r.cars.length;i++)for(let j=i+1;j<r.cars.length;j++){
-    const a=r.cars[i],b=r.cars[j]
-    if(a.finish||b.finish)continue
-    const dx=b.x-a.x,dz=b.z-a.z
-    const headingDelta=Math.atan2(Math.sin(b.heading-a.heading),Math.cos(b.heading-a.heading)),heading=a.heading+headingDelta*.5
-    const longitudinal=Math.abs(dx*Math.sin(heading)+dz*Math.cos(heading)),signedLateral=dx*Math.cos(heading)-dz*Math.sin(heading),minimumLateral=2.85
-    if(longitudinal>=5||Math.abs(signedLateral)>=minimumLateral)continue
-    const side=Math.sign(signedLateral)||((i+j)%2?1:-1),push=minimumLateral-Math.abs(signedLateral)+.025,sideX=Math.cos(heading)*side,sideZ=-Math.sin(heading)*side
-    a.x-=sideX*push*.5;a.z-=sideZ*push*.5;b.x+=sideX*push*.5;b.z+=sideZ*push*.5
-  }
   if(r.cars[0].finish) r.finished=true
 }
 export function standings(r: Race) {return [...r.cars].sort((a,b)=>a.finish&&b.finish?a.finish-b.finish:a.finish?-1:b.finish?1:b.progress-a.progress)}
