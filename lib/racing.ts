@@ -202,8 +202,8 @@ export function step(r: Race,c: Circuit,setup: Setup,keys: Set<string>,dt: numbe
       return
     }
     const accelerate=keys.has('w')||keys.has('arrowup'), brake=keys.has('s')||keys.has('arrowdown')
-    // Heading zero points down the circuit (+Z); positive steering turns to +X (screen right).
-    const steer=Number(keys.has('d')||keys.has('arrowright'))-Number(keys.has('a')||keys.has('arrowleft'))
+    // The rear 3D camera looks along +Z, so world +X appears on screen left.
+    const steer=Number(keys.has('a')||keys.has('arrowleft'))-Number(keys.has('d')||keys.has('arrowright'))
     if(keys.has('p')&&car.pitState==='track') { car.pitState='entry'; car.pitTimer=0 }
     if(car.pitState==='entry') {
       car.drsOpen=false; car.inSlipstream=false
