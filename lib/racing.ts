@@ -60,9 +60,7 @@ export function makeCircuit(id: number) {
   curve.arcLengthDivisions = 6000
   curve.updateArcLengths()
   const samples = curve.getSpacedPoints(3000).slice(0,3000)
-  // Extra raceable width keeps the GPS route recognizable while giving two
-  // modern single-seaters room to run wheel-to-wheel without forced contact.
-  return { curve, samples, length: curve.getLength(), width: tracks[id].width * 1.42 }
+  return { curve, samples, length: curve.getLength(), width: tracks[id].width * 1.18 }
 }
 export function pose(c: Circuit, distance: number, lane = 0) {
   const t = ((distance / c.length) % 1 + 1) % 1
