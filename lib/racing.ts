@@ -119,10 +119,17 @@ function curvatureBetween(c: Circuit, from: number, span: number) {
   const a=pose(c,from).heading,b=pose(c,from+span).heading
   return Math.abs(Math.atan2(Math.sin(b-a),Math.cos(b-a)))/span
 }
-function upcomingCurvature(c: Circuit, progress: number) {
-  let peak=0
-  for(const offset of [0,24,48,72,96])peak=Math.max(peak,curvatureBetween(c,progress+offset,24))
-  return peak
+const CORNERING_ACCELERATION = 36
+function upcomingCornerSpeedLimit(c: Circuit, progress: number, grip: number) {
+  let limit=Infinity
+  for(const offset of [0,20,40,60,80,100,120]) {
+    const curvature=curvatureBetween(c,progress+offset,20)
+    if(curvature<=.0001)continue
+    const cornerSpeed=Math.sqrt(CORNERING_ACCELERATION*grip/curvature)
+    const approachSpeed=Math.sqrt(cornerSpeed*cornerSpeed+2*36*offset)
+    limit=Math.min(limit,approachSpeed)
+  }
+  return limit
 }
 function straightPowerFactor(c: Circuit, progress: number) {
   let peak=0
@@ -210,14 +217,13 @@ export function step(r: Race,c: Circuit,setup: Setup,keys: Set<string>,dt: numbe
       const straightTopSpeed=engine.topSpeed+straightPower*4
       const activeZone=drsZonesForTrack(setup.track).some(zone=>{const d=((car.progress%c.length)+c.length)%c.length;return d>=zone.start*c.length&&d<=zone.end*c.length})
       const drsAvailable=activeZone&&car.drsEligibleUntil>=car.progress&&r.trackWetness<=.2
-      let target=(70+setup.difficulty*7)*car.pace*form*(1+tow*.18)*(1-r.trackWetness*.2)*powerMultiplier/(1+bend*3.1)
+      let target=(70+setup.difficulty*7)*car.pace*form*(1+tow*.18)*(1-r.trackWetness*.2)*powerMultiplier
       if(drsAvailable)target+=7
       target=Math.min(target,straightTopSpeed+(drsAvailable?8:0)+tow*7)
       car.drsOpen=drsAvailable
       if(r.time < car.mistakeUntil) target *= setup.difficulty===0?.68:.84
       const aiGrip=tyreSpecs[car.tyre].grip*(1-car.tyreWear*.32)*(1-r.trackWetness*.42)
-      const aiCurvature=upcomingCurvature(c,car.progress)
-      const aiCornerLimit=aiCurvature>.0001?Math.sqrt(32*aiGrip/aiCurvature):engine.topSpeed
+      const aiCornerLimit=upcomingCornerSpeedLimit(c,car.progress,aiGrip)
       target=Math.min(target,aiCornerLimit)
       if(blocking&&Math.abs(car.lane-blocking.other.lane)<3.8){const safeGap=8.5+Math.max(0,car.speed-blocking.other.speed)*.48;if(blocking.gap<safeGap+9)target=Math.min(target,Math.max(0,blocking.other.speed+(blocking.gap-safeGap)*.9))}
       const speedDelta=target-car.speed
@@ -282,8 +288,7 @@ export function step(r: Race,c: Circuit,setup: Setup,keys: Set<string>,dt: numbe
     const launchBoost=accelerate&&r.time<3&&car.speed<32?1.22:1
     let nextSpeed=Math.max(0,Math.min(straightTopSpeed+(drsOpen?8:0)+tow*7,car.speed+(accelerate?engine.acceleration*currentGrip*(1+tow*.48)*powerMultiplier*launchBoost: -3)*dt-(brake?42*(1-r.trackWetness*.2)*dt:0)-car.speed*car.speed*drag*dt))
     if(Number.isFinite(trafficSpeedCap)&&nextSpeed>trafficSpeedCap)nextSpeed=Math.max(trafficSpeedCap,car.speed-42*(1-r.trackWetness*.2)*dt)
-    const cornerCurvature=upcomingCurvature(c,car.progress)
-    const cornerSpeedLimit=cornerCurvature>.0001?Math.sqrt(32*currentGrip/cornerCurvature):engine.topSpeed
+    const cornerSpeedLimit=upcomingCornerSpeedLimit(c,car.progress,currentGrip)
     if(nextSpeed>cornerSpeedLimit)nextSpeed=Math.max(cornerSpeedLimit,car.speed-(curvatureBetween(c,car.progress,24)>.008?54:32)*dt)
     car.speed=nextSpeed
     car.heading+=steer*dt*1.88*Math.min(car.speed/12,1)/(1+car.speed/92)
