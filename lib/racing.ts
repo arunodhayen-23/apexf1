@@ -81,7 +81,7 @@ export function createRace(c: Circuit, setup: Setup, random: () => number = Math
   const names = [drivers[setup.driver].name, ...rivals]
   const startingWetness=(setup.trackCondition??'dry')==='dry'?0:setup.trackCondition==='damp'?.38:.76
   const rivalColors=['#e32932','#20cdb6','#233fc4','#f49b38','#f1eee8','#e32932','#20cdb6','#f49b38']
-  return { cars: names.map((name,i) => ({name, color: i === 0 ? teams[setup.team].color : rivalColors[(i-1)%rivalColors.length], ...pose(c, 8 - i*6, i%2 ? -3 : 3), speed:0, progress:8-i*6, checkpoint:1, lap:0, lapStart:0, best:Infinity, finish:0, lane:i%2 ? -3 : 3, pace:.94+random()*.12, phase:random()*Math.PI*2, consistency:.02+random()*.05, mistakeUntil:0, nextEvent:12+random()*22, tyre:'medium', tyreWear:0, drsEligibleUntil:Number.NEGATIVE_INFINITY, drsOpen:false, inSlipstream:false, pitState:'track', pitTimer:0})), time:0, countdown:3.5, paused:false, finished:false, camera:0, offroad:false, trackWetness:startingWetness }
+  return { cars: names.map((name,i) => ({name, color: i === 0 ? teams[setup.team].color : rivalColors[(i-1)%rivalColors.length], ...pose(c, 8 - i*6, i%2 ? -3 : 3), speed:0, progress:8-i*6, checkpoint:1, lap:0, lapStart:0, best:Infinity, finish:0, lane:i%2 ? -3 : 3, pace:.98+random()*.04, phase:random()*Math.PI*2, consistency:.015+random()*.025, mistakeUntil:0, nextEvent:12+random()*22, tyre:'medium', tyreWear:0, drsEligibleUntil:Number.NEGATIVE_INFINITY, drsOpen:false, inSlipstream:false, pitState:'track', pitTimer:0})), time:0, countdown:3.5, paused:false, finished:false, camera:0, offroad:false, trackWetness:startingWetness }
 }
 export function changeTyres(r: Race, tyre: Tyre) {
   const car=r.cars[0]
@@ -93,6 +93,9 @@ export function requestPit(r: Race) {
 }
 export function resetCar(r: Race,c: Circuit) {
   const car=r.cars[0]; Object.assign(car,pose(c,car.progress,0)); car.speed=0; car.lane=0; car.drsOpen=false; car.inSlipstream=false; car.pitState='track'; car.pitTimer=0
+}
+function updateTyreWear(car: Racer, dt: number) {
+  car.tyreWear=Math.min(1,car.tyreWear+dt*.00024*tyreSpecs[car.tyre].wear*(1+car.speed/100))
 }
 export function creditProgress(car: Racer, next: number, c: Circuit, time: number, laps: number) {
   const delta = next-car.progress
@@ -182,6 +185,7 @@ export function step(r: Race,c: Circuit,setup: Setup,keys: Set<string>,dt: numbe
     if(car.finish) return
     const previousProgress=car.progress
     if(i>0) {
+      updateTyreWear(car,dt)
       const a=pose(c,car.progress), b=pose(c,car.progress+24)
       const bend=Math.abs(Math.atan2(Math.sin(b.heading-a.heading),Math.cos(b.heading-a.heading)))
       if(setup.difficulty===0&&r.time > car.nextEvent) {
@@ -277,7 +281,7 @@ export function step(r: Race,c: Circuit,setup: Setup,keys: Set<string>,dt: numbe
     const bend=Math.abs(Math.atan2(Math.sin(bendEnd.heading-bendStart.heading),Math.cos(bendEnd.heading-bendStart.heading)))
     const tow=slipstreamStrength(car,r,c,bend)
     car.inSlipstream=tow>.08
-    car.tyreWear=Math.min(1,car.tyreWear+dt*.00024*tyreSpecs[car.tyre].wear*(1+car.speed/100))
+    updateTyreWear(car,dt)
     let trafficSpeedCap=Infinity
     for(const rival of r.cars.slice(1)){
       if(rival.finish)continue
@@ -311,3 +315,4 @@ export function step(r: Race,c: Circuit,setup: Setup,keys: Set<string>,dt: numbe
 }
 export function standings(r: Race) {return [...r.cars].sort((a,b)=>a.finish&&b.finish?a.finish-b.finish:a.finish?-1:b.finish?1:b.progress-a.progress)}
 export function formatTime(s: number){ if(!Number.isFinite(s)||s<=0)return '—'; return `${Math.floor(s/60)}:${(s%60).toFixed(3).padStart(6,'0')}` }
+
