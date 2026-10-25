@@ -274,9 +274,8 @@ export function step(r: Race,c: Circuit,setup: Setup,keys: Set<string>,dt: numbe
     const drsOpen=drsEligible&&keys.has('e')&&accelerate
     car.drsOpen=drsOpen
     const currentGrip=tyreSpecs[car.tyre].grip*(1-car.tyreWear*.32)*(1-r.trackWetness*.42)
-    const straightPower=straightPowerFactor(c,car.progress)
-    const powerMultiplier=1+straightPower*.2
-    const straightTopSpeed=engine.topSpeed+straightPower*4
+    const powerMultiplier=1.2
+    const topSpeed=engine.topSpeed+4
     const bendStart=pose(c,car.progress),bendEnd=pose(c,car.progress+24)
     const bend=Math.abs(Math.atan2(Math.sin(bendEnd.heading-bendStart.heading),Math.cos(bendEnd.heading-bendStart.heading)))
     const tow=slipstreamStrength(car,r,c,bend)
@@ -290,28 +289,19 @@ export function step(r: Race,c: Circuit,setup: Setup,keys: Set<string>,dt: numbe
     }
     const drag=drsOpen?.00105:tow>.08?.00095:.0017
     const launchBoost=accelerate&&r.time<3&&car.speed<32?1.22:1
-    let nextSpeed=Math.max(0,Math.min(straightTopSpeed+(drsOpen?8:0)+tow*7,car.speed+(accelerate?engine.acceleration*currentGrip*(1+tow*.48)*powerMultiplier*launchBoost: -3)*dt-(brake?42*(1-r.trackWetness*.2)*dt:0)-car.speed*car.speed*drag*dt))
+    let nextSpeed=Math.max(0,Math.min(topSpeed+(drsOpen?8:0)+tow*7,car.speed+(accelerate?engine.acceleration*currentGrip*(1+tow*.48)*powerMultiplier*launchBoost: -3)*dt-(brake?42*(1-r.trackWetness*.2)*dt:0)-car.speed*car.speed*drag*dt))
     if(Number.isFinite(trafficSpeedCap)&&nextSpeed>trafficSpeedCap)nextSpeed=Math.max(trafficSpeedCap,car.speed-42*(1-r.trackWetness*.2)*dt)
-    const cornerSpeedLimit=upcomingCornerSpeedLimit(c,car.progress,currentGrip)
-    if(nextSpeed>cornerSpeedLimit)nextSpeed=Math.max(cornerSpeedLimit,car.speed-(curvatureBetween(c,car.progress,24)>.008?54:32)*dt)
     car.speed=nextSpeed
-    car.heading+=steer*dt*1.88*Math.min(car.speed/12,1)/(1+car.speed/92)
-    car.x+=Math.sin(car.heading)*car.speed*dt; car.z+=Math.cos(car.heading)*car.speed*dt
-    const sampleCount=c.samples.length, hint=((Math.floor(((car.progress%c.length+c.length)%c.length)/c.length*sampleCount)%sampleCount)+sampleCount)%sampleCount
-    let index=hint, nearest=Infinity
-    const search=(radius:number)=>{for(let offset=-radius;offset<=radius;offset++){const j=(hint+offset+sampleCount)%sampleCount,p=c.samples[j],d=(p.x-car.x)**2+(p.z-car.z)**2;if(d<nearest){nearest=d;index=j}}}
-    search(24)
-    if(nearest>(c.width*2)**2) { nearest=Infinity; for(let j=0;j<sampleCount;j++){const p=c.samples[j],d=(p.x-car.x)**2+(p.z-car.z)**2;if(d<nearest){nearest=d;index=j}} }
-    const distance=Math.sqrt(nearest)
-    r.offroad=distance>c.width/2
-    if(r.offroad) car.speed*=Math.exp(-dt*(1.5+r.trackWetness*.8))
-    if(distance>c.width/2+5){ const p=c.samples[index]; const scale=(c.width/2+4)/distance; car.x=p.x+(car.x-p.x)*scale; car.z=p.z+(car.z-p.z)*scale; car.speed*=.6 }
-    let next=index/c.samples.length*c.length+Math.floor(car.progress/c.length)*c.length
-    if(distance<c.width/2+2) creditProgress(car,next,c,r.time,setup.laps)
+    const laneLimit=Math.max(0,c.width/2-1.8)
+    car.lane=Math.max(-laneLimit,Math.min(laneLimit,car.lane+steer*5.5*dt))
+    const next=car.progress+car.speed*dt
+    creditProgress(car,next,c,r.time,setup.laps)
     updateDRS(car,previousProgress,r,setup.track,c.length)
-    if(!steer&&distance<c.width/2) {const tangent=pose(c,index/sampleCount*c.length).heading;const correction=Math.atan2(Math.sin(tangent-car.heading),Math.cos(tangent-car.heading));car.heading+=correction*Math.min(1,dt*(.6+r.trackWetness*.35))}
+    Object.assign(car,pose(c,car.progress,car.lane))
+    r.offroad=false
   })
   if(r.cars[0].finish) r.finished=true
 }
 export function standings(r: Race) {return [...r.cars].sort((a,b)=>a.finish&&b.finish?a.finish-b.finish:a.finish?-1:b.finish?1:b.progress-a.progress)}
 export function formatTime(s: number){ if(!Number.isFinite(s)||s<=0)return '—'; return `${Math.floor(s/60)}:${(s%60).toFixed(3).padStart(6,'0')}` }
+
