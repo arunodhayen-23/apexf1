@@ -165,8 +165,8 @@ function updateDRS(car: Racer, previousProgress: number, race: Race, track: numb
   for(let lap=firstLap;lap<=lastLap;lap++) for(const zone of zones) {
     const detection=lap*length+zone.detection*length
     if(previousProgress<detection&&car.progress>=detection) {
-      const gap=race.cars.filter(other=>other!==car&&!other.finish).map(other=>({other,gap:trackGap(car.progress,other.progress,length)})).filter(item=>item.gap>0).sort((a,b)=>a.gap-b.gap)[0]
-      const withinOneSecond=race.trackWetness<=.2&&!!gap&&gap.gap<=Math.max(1,car.speed,gap.other.speed)
+      const gap=race.cars.filter(other=>other!==car&&!other.finish).map(other=>({other,gap:trackGap(car.progress,other.progress,length)})).filter(item=>Math.abs(item.gap)>.01).sort((a,b)=>Math.abs(a.gap)-Math.abs(b.gap))[0]
+      const withinOneSecond=race.trackWetness<=.2&&!!gap&&Math.abs(gap.gap)<=Math.max(1,car.speed,gap.other.speed)
       car.drsEligibleUntil=withinOneSecond?lap*length+zone.end*length:Number.NEGATIVE_INFINITY
     }
   }
@@ -221,9 +221,9 @@ export function step(r: Race,c: Circuit,setup: Setup,keys: Set<string>,dt: numbe
       const straightTopSpeed=engine.topSpeed+straightPower*4
       const activeZone=drsZonesForTrack(setup.track).some(zone=>{const d=((car.progress%c.length)+c.length)%c.length;return d>=zone.start*c.length&&d<=zone.end*c.length})
       const drsAvailable=activeZone&&car.drsEligibleUntil>=car.progress&&r.trackWetness<=.2
-      let target=(70+setup.difficulty*7)*car.pace*form*(1+tow*.18)*(1-r.trackWetness*.2)*powerMultiplier
+      let target=(70+setup.difficulty*7)*car.pace*form*(1+tow*.08)*(1-r.trackWetness*.2)*powerMultiplier
       if(drsAvailable)target+=7
-      target=Math.min(target,straightTopSpeed+(drsAvailable?8:0)+tow*7)
+      target=Math.min(target,straightTopSpeed+(drsAvailable?8:0)+tow*2)
       car.drsOpen=drsAvailable
       if(r.time < car.mistakeUntil) target *= setup.difficulty===0?.68:.84
       const aiGrip=tyreSpecs[car.tyre].grip*(1-car.tyreWear*.32)*(1-r.trackWetness*.42)
@@ -271,7 +271,7 @@ export function step(r: Race,c: Circuit,setup: Setup,keys: Set<string>,dt: numbe
     const engine=engineSpecs[setup.engine??'v10']
     const activeZone=drsZonesForTrack(setup.track).some(zone=>{const d=((car.progress%c.length)+c.length)%c.length;return d>=zone.start*c.length&&d<=zone.end*c.length})
     const drsEligible=car.drsEligibleUntil>=car.progress&&activeZone&&r.trackWetness<=.2
-    const drsOpen=drsEligible&&keys.has('e')&&accelerate
+    const drsOpen=drsEligible&&accelerate
     car.drsOpen=drsOpen
     const currentGrip=tyreSpecs[car.tyre].grip*(1-car.tyreWear*.32)*(1-r.trackWetness*.42)
     const powerMultiplier=1.2
@@ -287,9 +287,9 @@ export function step(r: Race,c: Circuit,setup: Setup,keys: Set<string>,dt: numbe
       const dx=rival.x-car.x,dz=rival.z-car.z,forward=dx*Math.sin(car.heading)+dz*Math.cos(car.heading),lateral=Math.abs(dx*Math.cos(car.heading)-dz*Math.sin(car.heading))
       if(forward>0&&forward<Math.max(26,car.speed*.8)&&lateral<3.2){const safeGap=8;trafficSpeedCap=Math.min(trafficSpeedCap,Math.sqrt(rival.speed*rival.speed+2*36*(Math.max(0,forward-safeGap))))}
     }
-    const drag=drsOpen?.00105:tow>.08?.00095:.0017
+    const drag=drsOpen?.00105:tow>.08?.0007:.0017
     const launchBoost=accelerate&&r.time<3&&car.speed<32?1.22:1
-    let nextSpeed=Math.max(0,Math.min(topSpeed+(drsOpen?8:0)+tow*7,car.speed+(accelerate?engine.acceleration*currentGrip*(1+tow*.48)*powerMultiplier*launchBoost: -3)*dt-(brake?42*(1-r.trackWetness*.2)*dt:0)-car.speed*car.speed*drag*dt))
+    let nextSpeed=Math.max(0,Math.min(topSpeed+(drsOpen?8:0)+tow*12,car.speed+(accelerate?engine.acceleration*currentGrip*(1+tow*.8)*powerMultiplier*launchBoost: -3)*dt-(brake?42*(1-r.trackWetness*.2)*dt:0)-car.speed*car.speed*drag*dt))
     if(Number.isFinite(trafficSpeedCap)&&nextSpeed>trafficSpeedCap)nextSpeed=Math.max(trafficSpeedCap,car.speed-42*(1-r.trackWetness*.2)*dt)
     car.speed=nextSpeed
     const laneLimit=Math.max(0,c.width/2-1.8)
@@ -304,4 +304,5 @@ export function step(r: Race,c: Circuit,setup: Setup,keys: Set<string>,dt: numbe
 }
 export function standings(r: Race) {return [...r.cars].sort((a,b)=>a.finish&&b.finish?a.finish-b.finish:a.finish?-1:b.finish?1:b.progress-a.progress)}
 export function formatTime(s: number){ if(!Number.isFinite(s)||s<=0)return '—'; return `${Math.floor(s/60)}:${(s%60).toFixed(3).padStart(6,'0')}` }
+
 
