@@ -292,7 +292,7 @@ export function step(r: Race,c: Circuit,setup: Setup,keys: Set<string>,dt: numbe
     let nextSpeed=Math.max(0,Math.min(topSpeed+(drsOpen?8:0)+tow*12,car.speed+(accelerate?engine.acceleration*currentGrip*(1+tow*.8)*powerMultiplier*launchBoost: -3)*dt-(brake?42*(1-r.trackWetness*.2)*dt:0)-car.speed*car.speed*drag*dt))
     if(Number.isFinite(trafficSpeedCap)&&nextSpeed>trafficSpeedCap)nextSpeed=Math.max(trafficSpeedCap,car.speed-42*(1-r.trackWetness*.2)*dt)
     car.speed=nextSpeed
-    const steeringRate=Math.max(1.88,car.speed*.06)
+    const steeringRate=1.88*Math.min(car.speed/12,1)/(1+car.speed/92)
     car.heading+=steer*dt*steeringRate
     car.x+=Math.sin(car.heading)*car.speed*dt; car.z+=Math.cos(car.heading)*car.speed*dt
     const sampleCount=c.samples.length, hint=((Math.floor(((car.progress%c.length+c.length)%c.length)/c.length*sampleCount)%sampleCount)+sampleCount)%sampleCount
@@ -312,6 +312,7 @@ export function step(r: Race,c: Circuit,setup: Setup,keys: Set<string>,dt: numbe
 }
 export function standings(r: Race) {return [...r.cars].sort((a,b)=>a.finish&&b.finish?a.finish-b.finish:a.finish?-1:b.finish?1:b.progress-a.progress)}
 export function formatTime(s: number){ if(!Number.isFinite(s)||s<=0)return '—'; return `${Math.floor(s/60)}:${(s%60).toFixed(3).padStart(6,'0')}` }
+
 
 
 
