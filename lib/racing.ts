@@ -292,17 +292,26 @@ export function step(r: Race,c: Circuit,setup: Setup,keys: Set<string>,dt: numbe
     let nextSpeed=Math.max(0,Math.min(topSpeed+(drsOpen?8:0)+tow*12,car.speed+(accelerate?engine.acceleration*currentGrip*(1+tow*.8)*powerMultiplier*launchBoost: -3)*dt-(brake?42*(1-r.trackWetness*.2)*dt:0)-car.speed*car.speed*drag*dt))
     if(Number.isFinite(trafficSpeedCap)&&nextSpeed>trafficSpeedCap)nextSpeed=Math.max(trafficSpeedCap,car.speed-42*(1-r.trackWetness*.2)*dt)
     car.speed=nextSpeed
-    const laneLimit=Math.max(0,c.width/2-1.8)
-    car.lane=Math.max(-laneLimit,Math.min(laneLimit,car.lane+steer*5.5*dt))
-    const next=car.progress+car.speed*dt
-    creditProgress(car,next,c,r.time,setup.laps)
+    const steeringRate=Math.max(1.88,car.speed*.06)
+    car.heading+=steer*dt*steeringRate
+    car.x+=Math.sin(car.heading)*car.speed*dt; car.z+=Math.cos(car.heading)*car.speed*dt
+    const sampleCount=c.samples.length, hint=((Math.floor(((car.progress%c.length+c.length)%c.length)/c.length*sampleCount)%sampleCount)+sampleCount)%sampleCount
+    let index=hint, nearest=Infinity
+    const search=(radius:number)=>{for(let offset=-radius;offset<=radius;offset++){const j=(hint+offset+sampleCount)%sampleCount,p=c.samples[j],d=(p.x-car.x)**2+(p.z-car.z)**2;if(d<nearest){nearest=d;index=j}}}
+    search(24)
+    if(nearest>(c.width*2)**2) { nearest=Infinity; for(let j=0;j<sampleCount;j++){const p=c.samples[j],d=(p.x-car.x)**2+(p.z-car.z)**2;if(d<nearest){nearest=d;index=j}} }
+    const distance=Math.sqrt(nearest)
+    r.offroad=distance>c.width/2
+    if(r.offroad) car.speed*=Math.exp(-dt*(1.5+r.trackWetness*.8))
+    if(distance>c.width/2+5){ const p=c.samples[index]; const scale=(c.width/2+4)/distance; car.x=p.x+(car.x-p.x)*scale; car.z=p.z+(car.z-p.z)*scale; car.speed*=.6 }
+    const next=index/c.samples.length*c.length+Math.floor(car.progress/c.length)*c.length
+    if(distance<c.width/2+2) creditProgress(car,next,c,r.time,setup.laps)
     updateDRS(car,previousProgress,r,setup.track,c.length)
-    Object.assign(car,pose(c,car.progress,car.lane))
-    r.offroad=false
   })
   if(r.cars[0].finish) r.finished=true
 }
 export function standings(r: Race) {return [...r.cars].sort((a,b)=>a.finish&&b.finish?a.finish-b.finish:a.finish?-1:b.finish?1:b.progress-a.progress)}
 export function formatTime(s: number){ if(!Number.isFinite(s)||s<=0)return '—'; return `${Math.floor(s/60)}:${(s%60).toFixed(3).padStart(6,'0')}` }
+
 
 
