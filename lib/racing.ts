@@ -302,8 +302,7 @@ export function step(r: Race,c: Circuit,setup: Setup,keys: Set<string>,dt: numbe
     if(nearest>(c.width*2)**2) { nearest=Infinity; for(let j=0;j<sampleCount;j++){const p=c.samples[j],d=(p.x-car.x)**2+(p.z-car.z)**2;if(d<nearest){nearest=d;index=j}} }
     const distance=Math.sqrt(nearest)
     r.offroad=distance>c.width/2
-    if(r.offroad) car.speed*=Math.exp(-dt*(1.5+r.trackWetness*.8))
-    if(distance>c.width/2+5){ const p=c.samples[index]; const scale=(c.width/2+4)/distance; car.x=p.x+(car.x-p.x)*scale; car.z=p.z+(car.z-p.z)*scale; car.speed*=.6 }
+    if(distance>c.width/2+5){ const p=c.samples[index]; const recoveryDistance=c.width/2+1.5; const scale=recoveryDistance/distance; car.x=p.x+(car.x-p.x)*scale; car.z=p.z+(car.z-p.z)*scale }
     const next=index/c.samples.length*c.length+Math.floor(car.progress/c.length)*c.length
     if(distance<c.width/2+2) creditProgress(car,next,c,r.time,setup.laps)
     updateDRS(car,previousProgress,r,setup.track,c.length)
@@ -312,6 +311,7 @@ export function step(r: Race,c: Circuit,setup: Setup,keys: Set<string>,dt: numbe
 }
 export function standings(r: Race) {return [...r.cars].sort((a,b)=>a.finish&&b.finish?a.finish-b.finish:a.finish?-1:b.finish?1:b.progress-a.progress)}
 export function formatTime(s: number){ if(!Number.isFinite(s)||s<=0)return '—'; return `${Math.floor(s/60)}:${(s%60).toFixed(3).padStart(6,'0')}` }
+
 
 
 
