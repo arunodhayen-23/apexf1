@@ -7,7 +7,7 @@ import { changeTyres, createRace, drivers, drsZonesForTrack, engineSpecs, format
 import { circuitPoints } from '@/lib/circuits'
 import { circuitVisual } from '@/lib/circuit-visuals'
 const Scene=dynamic(()=>import('./scene'),{ssr:false,loading:()=> <div className="scene-loading">PREPARING THE GRID<span/></div>})
-type EngineAudioNodes={context:AudioContext;primary:OscillatorNode;secondary:OscillatorNode;filter:BiquadFilterNode;master:GainNode}
+type EngineAudioNodes={context:AudioContext;primary:OscillatorNode;secondary:OscillatorNode;filter:BiquadFilterNode;compressor:DynamicsCompressorNode;master:GainNode}
 function TrackOutline({id,className='',race}:{id:number;className?:string;race?:Race}){
  const points=useMemo(()=>circuitPoints(id).map(([x,y])=>({x:Number(x.toFixed(1)),y:Number(y.toFixed(1))})),[id])
  const xs=points.map(p=>p.x),ys=points.map(p=>p.y),minX=Math.min(...xs),minY=Math.min(...ys),w=Math.max(...xs)-minX,h=Math.max(...ys)-minY,size=Math.max(w,h)
@@ -49,14 +49,15 @@ export default function Game(){
   if(typeof window==='undefined'||!window.AudioContext)return
   try{
    if(!engineAudio.current){
-    const context=new AudioContext(),primary=context.createOscillator(),secondary=context.createOscillator(),filter=context.createBiquadFilter(),master=context.createGain()
+    const context=new AudioContext(),primary=context.createOscillator(),secondary=context.createOscillator(),filter=context.createBiquadFilter(),compressor=context.createDynamicsCompressor(),master=context.createGain()
     primary.type='sawtooth';secondary.type='triangle';secondary.detune.value=-8
-    filter.type='lowpass';filter.frequency.value=1400;filter.Q.value=.7
+    filter.type='lowpass';filter.frequency.value=2200;filter.Q.value=.7
+    compressor.threshold.value=-12;compressor.knee.value=8;compressor.ratio.value=3;compressor.attack.value=.004;compressor.release.value=.16
     const primaryGain=context.createGain(),secondaryGain=context.createGain()
-    primaryGain.gain.value=.32;secondaryGain.gain.value=.16;master.gain.value=0
-    primary.connect(primaryGain);secondary.connect(secondaryGain);primaryGain.connect(filter);secondaryGain.connect(filter);filter.connect(master);master.connect(context.destination)
+    primaryGain.gain.value=.42;secondaryGain.gain.value=.2;master.gain.value=0
+    primary.connect(primaryGain);secondary.connect(secondaryGain);primaryGain.connect(filter);secondaryGain.connect(filter);filter.connect(compressor);compressor.connect(master);master.connect(context.destination)
     primary.start();secondary.start()
-    engineAudio.current={context,primary,secondary,filter,master}
+    engineAudio.current={context,primary,secondary,filter,compressor,master}
    }
    if(engineAudio.current.context.state==='suspended')void engineAudio.current.context.resume().catch(()=>{})
   }catch{}
@@ -69,14 +70,14 @@ export default function Game(){
   const updateSound=()=>{
    const sound=engineAudio.current,player=race?.cars[0],engine=engineSpecs[setup.engine??'v10']
    if(sound){
-    const active=!!player&&!!race&&!race.paused&&!race.finished&&player.pitState!=='stopped'
+    const active=!!player&&!!race&&!race.paused&&!race.finished
     const maxSpeed=engine.topSpeed+8,speedRatio=Math.max(0,Math.min(1,(player?.speed??0)/maxSpeed)),gearIndex=Math.min(7,Math.floor(speedRatio*8)),gearProgress=Math.min(1,speedRatio*8-gearIndex)
     const throttle=keys.current.has('w')||keys.current.has('arrowup'),idleRpm=engine.peakRpm*.22
     const rpm=Math.min(engine.peakRpm,idleRpm+gearProgress*(engine.peakRpm-idleRpm)+(throttle?(engine.peakRpm-idleRpm)*.16:0))
     const pulseHz=rpm*(setup.engine==='v8'?8:10)/120,now=sound.context.currentTime
     sound.primary.frequency.setTargetAtTime(pulseHz,now,.045);sound.secondary.frequency.setTargetAtTime(pulseHz*.5,now,.055)
-    sound.filter.frequency.setTargetAtTime(1000+speedRatio*2100,now,.08)
-    sound.master.gain.setTargetAtTime(active?(throttle?.22:.12)*(0.78+speedRatio*.22):0,now,.08)
+    sound.filter.frequency.setTargetAtTime(1600+speedRatio*2600,now,.08)
+    sound.master.gain.setTargetAtTime(active?(throttle?.48:.32)*(0.9+speedRatio*.1):0,now,.08)
    }
    frame=requestAnimationFrame(updateSound)
   }
@@ -132,6 +133,7 @@ export default function Game(){
   </div>{help&&<div className="modal-backdrop"><section className="race-modal" role="dialog" aria-modal="true" aria-label="Driving controls"><button className="close-button" aria-label="Close controls" onClick={()=>setHelp(false)}><X/></button><span className="eyebrow">BEFORE LIGHTS OUT</span><h2>Find your racing line.</h2><p>Steer into corners with A/D and keep the throttle down. The car no longer slows automatically for turns; leaving the track still costs speed.</p><div className="controls-list">{[['W / ↑','Accelerate'],['S / ↓','Brake'],['A D / ← →','Steer'],['P','Pit and change tyres'],['C','Switch camera'],['R','Reset to track'],['ESC','Pause / resume']].map(([key,label])=><div key={key}><kbd>{key}</kbd><span>{label}</span></div>)}</div><p className="muted">Follow a car within about 50m on a straight to pick up its slipstream; the speed display will say SLIPSTREAM ACTIVE. Steer into a clear lane early to pass. The collision buffer now allows safe side-by-side passes. Choose a V8 or V10 engine. DRS opens automatically in a marked zone when you are within one second of another car and holding the throttle; wet conditions disable it.</p><p className="muted">Every venue uses its real GPS-based layout and a unique circuit environment, with its own trackside colors and surroundings. Floodlit circuits race after dark or at twilight. Rival pace and overtakes vary each race; track grip changes with your weather and surface choices. Records stay on this device.</p><p className="muted">Circuit data: <a href="https://github.com/bacinger/f1-circuits" target="_blank" rel="noreferrer">Tomislav Bacinger · MIT license</a>. Venue scenery is an artistic recreation.</p><button className="primary" onClick={()=>setHelp(false)}>Ready to race <ArrowRight size={16}/></button></section></div>}
  </main>
 }
+
 
 
 
