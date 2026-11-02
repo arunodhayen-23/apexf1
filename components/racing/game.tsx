@@ -7,7 +7,6 @@ import { changeTyres, createRace, drivers, drsZonesForTrack, engineSpecs, format
 import { circuitPoints } from '@/lib/circuits'
 import { circuitVisual } from '@/lib/circuit-visuals'
 const Scene=dynamic(()=>import('./scene'),{ssr:false,loading:()=> <div className="scene-loading">PREPARING THE GRID<span/></div>})
-type EngineAudioNodes={context:AudioContext;v8:HTMLAudioElement;v10:HTMLAudioElement;v8Source:MediaElementAudioSourceNode;v10Source:MediaElementAudioSourceNode;v8Gain:GainNode;v10Gain:GainNode;compressor:DynamicsCompressorNode;master:GainNode}
 function TrackOutline({id,className='',race}:{id:number;className?:string;race?:Race}){
  const points=useMemo(()=>circuitPoints(id).map(([x,y])=>({x:Number(x.toFixed(1)),y:Number(y.toFixed(1))})),[id])
  const xs=points.map(p=>p.x),ys=points.map(p=>p.y),minX=Math.min(...xs),minY=Math.min(...ys),w=Math.max(...xs)-minX,h=Math.max(...ys)-minY,size=Math.max(w,h)
@@ -43,50 +42,10 @@ const defaultSetup:Setup={track:0,driver:0,team:0,laps:3,difficulty:2,engine:'v1
 export default function Game(){
  const [setup,setSetup]=useState<Setup>(defaultSetup),[race,setRace]=useState<Race|null>(null),[revision,render]=useState(0),[help,setHelp]=useState(false),[records,setRecords]=useState<Record<string,number>>({}),[loaded,setLoaded]=useState(false)
  const keys=useRef(new Set<string>())
- const engineAudio=useRef<EngineAudioNodes|null>(null)
  const updateHud=useCallback(()=>render(v=>v+1),[])
- const startEngineAudio=useCallback(()=>{
-  if(typeof window==='undefined'||!window.AudioContext)return
-  try{
-   if(!engineAudio.current){
-    const context=new AudioContext(),basePath=window.location.pathname.startsWith('/apexf1')?'/apexf1':'',v8=new Audio(`${basePath}/audio/f1-v8-mp4-23-2008.ogg`),v10=new Audio(`${basePath}/audio/f1-v10-red-bull-rb1-2005.ogg`),compressor=context.createDynamicsCompressor(),master=context.createGain(),v8Gain=context.createGain(),v10Gain=context.createGain()
-    v8.loop=true;v10.loop=true;v8.preload='auto';v10.preload='auto';v8.playbackRate=.82;v10.playbackRate=.82
-    compressor.threshold.value=-12;compressor.knee.value=8;compressor.ratio.value=3;compressor.attack.value=.004;compressor.release.value=.16
-    v8Gain.gain.value=0;v10Gain.gain.value=0;master.gain.value=.9
-    const v8Source=context.createMediaElementSource(v8),v10Source=context.createMediaElementSource(v10)
-    v8Source.connect(v8Gain);v10Source.connect(v10Gain);v8Gain.connect(compressor);v10Gain.connect(compressor);compressor.connect(master);master.connect(context.destination)
-    engineAudio.current={context,v8,v10,v8Source,v10Source,v8Gain,v10Gain,compressor,master}
-   }
-   const sound=engineAudio.current,selected=setup.engine==='v8'?sound.v8:sound.v10,other=setup.engine==='v8'?sound.v10:sound.v8
-   other.pause();selected.currentTime=0
-   if(sound.context.state==='suspended')void sound.context.resume().catch(()=>{})
-   void selected.play().catch(()=>{})
-  }catch{}
- },[setup.engine])
  const circuit=useMemo(()=>makeCircuit(setup.track),[setup.track])
  useEffect(()=>{try{const stored=JSON.parse(localStorage.getItem('apex-settings')||'null');if(stored&&Number.isInteger(stored.track)&&stored.track>=0&&stored.track<tracks.length&&[0,1,2,3].includes(stored.driver)&&[0,1,2].includes(stored.team)&&[1,3,5].includes(stored.laps)&&[0,1,2].includes(stored.difficulty))setSetup({...defaultSetup,...stored,engine:['v8','v10'].includes(stored.engine)?stored.engine:defaultSetup.engine,weather:['clear','cloudy','rain','heavy-rain'].includes(stored.weather)?stored.weather:defaultSetup.weather,trackCondition:['dry','damp','wet'].includes(stored.trackCondition)?stored.trackCondition:defaultSetup.trackCondition});const savedRecords=JSON.parse(localStorage.getItem('apex-real-circuit-records-v2')||'{}');if(savedRecords&&typeof savedRecords==='object')setRecords(Object.fromEntries(Object.entries(savedRecords).filter(([key,value])=>tracks.some((_,i)=>String(i)===key)&&typeof value==='number'&&Number.isFinite(value)&&value>0)) as Record<string,number>)}catch{}setLoaded(true)},[])
  useEffect(()=>{if(loaded)try{localStorage.setItem('apex-settings',JSON.stringify(setup))}catch{}},[setup,loaded])
- useEffect(()=>{
-  let frame=0
-  const updateSound=()=>{
-    const sound=engineAudio.current,player=race?.cars[0]
-   if(sound){
-    const active=!!player&&!!race&&!race.paused&&!race.finished,selected=setup.engine==='v8'?sound.v8:sound.v10,other=setup.engine==='v8'?sound.v10:sound.v8,selectedGain=setup.engine==='v8'?sound.v8Gain:sound.v10Gain,otherGain=setup.engine==='v8'?sound.v10Gain:sound.v8Gain
-    const speed=player?.speed??0,gearIndex=Math.min(7,Math.floor(speed/12)),gearProgress=gearIndex===7?Math.max(0,Math.min(1,(speed-84)/10)):(speed-gearIndex*12)/12,throttle=keys.current.has('w')||keys.current.has('arrowup')
-    const targetRate=Math.max(.72,Math.min(1.55,.76+gearProgress*.62+(throttle?.14:0)))
-    selected.playbackRate+= (targetRate-selected.playbackRate)*.12
-    const now=sound.context.currentTime
-    selectedGain.gain.setTargetAtTime(active?.95:0,now,.12);otherGain.gain.setTargetAtTime(0,now,.08)
-    sound.master.gain.setTargetAtTime(active?.9:0,now,.12)
-    if(active&&selected.paused)void selected.play().catch(()=>{})
-    if(!active){if(!selected.paused)selected.pause();if(!other.paused)other.pause()}
-   }
-   frame=requestAnimationFrame(updateSound)
-  }
-  frame=requestAnimationFrame(updateSound)
-  return()=>cancelAnimationFrame(frame)
- },[race,setup.engine])
- useEffect(()=>()=>{const sound=engineAudio.current;if(sound){void sound.context.close();engineAudio.current=null}},[])
  useEffect(()=>{
   if(!race)return
   const down=(e:KeyboardEvent)=>{if(e.isComposing||e.keyCode===229)return;const k=e.key.toLowerCase();if(['arrowup','arrowdown','arrowleft','arrowright',' '].includes(k))e.preventDefault();if(k==='p'){if(!e.repeat){requestPit(race);render(v=>v+1)}return}keys.current.add(k);if(e.repeat)return;if(k==='escape'){race.paused=!race.paused;keys.current.clear();render(v=>v+1)}if(k==='c')race.camera=1-race.camera;if(k==='r'&&!race.finished)resetCar(race,circuit)}
@@ -106,7 +65,7 @@ export default function Game(){
   document.addEventListener('keydown',trap)
   return()=>{document.removeEventListener('keydown',trap);if(previous?.isConnected)previous.focus()}
  },[help,race?.paused,race?.finished])
- const start=()=>{keys.current.clear();startEngineAudio();setRace(createRace(circuit,setup))}
+ const start=()=>{keys.current.clear();setRace(createRace(circuit,setup))}
  const change=<K extends keyof Setup>(key:K,value:Setup[K])=>setSetup(s=>({...s,[key]:value}))
  const driver=drivers[setup.driver],team=teams[setup.team],track=tracks[setup.track]
  if(race){const order=standings(race),player=race.cars[0],position=order.indexOf(player)+1;return <main className="race-screen">
@@ -135,9 +94,6 @@ export default function Game(){
   </div>{help&&<div className="modal-backdrop"><section className="race-modal" role="dialog" aria-modal="true" aria-label="Driving controls"><button className="close-button" aria-label="Close controls" onClick={()=>setHelp(false)}><X/></button><span className="eyebrow">BEFORE LIGHTS OUT</span><h2>Find your racing line.</h2><p>Steer into corners with A/D and keep the throttle down. The car no longer slows automatically for turns; leaving the track still costs speed.</p><div className="controls-list">{[['W / ↑','Accelerate'],['S / ↓','Brake'],['A D / ← →','Steer'],['P','Pit and change tyres'],['C','Switch camera'],['R','Reset to track'],['ESC','Pause / resume']].map(([key,label])=><div key={key}><kbd>{key}</kbd><span>{label}</span></div>)}</div><p className="muted">Follow a car within about 50m on a straight to pick up its slipstream; the speed display will say SLIPSTREAM ACTIVE. Steer into a clear lane early to pass. The collision buffer now allows safe side-by-side passes. Choose a V8 or V10 engine. DRS opens automatically in a marked zone when you are within one second of another car and holding the throttle; wet conditions disable it.</p><p className="muted">Every venue uses its real GPS-based layout and a unique circuit environment, with its own trackside colors and surroundings. Floodlit circuits race after dark or at twilight. Rival pace and overtakes vary each race; track grip changes with your weather and surface choices. Records stay on this device.</p><p className="muted">Circuit data: <a href="https://github.com/bacinger/f1-circuits" target="_blank" rel="noreferrer">Tomislav Bacinger · MIT license</a>. Venue scenery is an artistic recreation.</p><button className="primary" onClick={()=>setHelp(false)}>Ready to race <ArrowRight size={16}/></button></section></div>}
  </main>
 }
-
-
-
 
 
 
