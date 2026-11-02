@@ -7,6 +7,7 @@ import { changeTyres, createRace, drivers, drsZonesForTrack, engineSpecs, format
 import { circuitPoints } from '@/lib/circuits'
 import { circuitVisual } from '@/lib/circuit-visuals'
 const Scene=dynamic(()=>import('./scene'),{ssr:false,loading:()=> <div className="scene-loading">PREPARING THE GRID<span/></div>})
+type EngineAudioNodes={context:AudioContext;primary:OscillatorNode;secondary:OscillatorNode;filter:BiquadFilterNode;master:GainNode}
 function TrackOutline({id,className='',race}:{id:number;className?:string;race?:Race}){
  const points=useMemo(()=>circuitPoints(id).map(([x,y])=>({x:Number(x.toFixed(1)),y:Number(y.toFixed(1))})),[id])
  const xs=points.map(p=>p.x),ys=points.map(p=>p.y),minX=Math.min(...xs),minY=Math.min(...ys),w=Math.max(...xs)-minX,h=Math.max(...ys)-minY,size=Math.max(w,h)
@@ -42,10 +43,47 @@ const defaultSetup:Setup={track:0,driver:0,team:0,laps:3,difficulty:2,engine:'v1
 export default function Game(){
  const [setup,setSetup]=useState<Setup>(defaultSetup),[race,setRace]=useState<Race|null>(null),[revision,render]=useState(0),[help,setHelp]=useState(false),[records,setRecords]=useState<Record<string,number>>({}),[loaded,setLoaded]=useState(false)
  const keys=useRef(new Set<string>())
+ const engineAudio=useRef<EngineAudioNodes|null>(null)
  const updateHud=useCallback(()=>render(v=>v+1),[])
+ const startEngineAudio=useCallback(()=>{
+  if(typeof window==='undefined'||!window.AudioContext)return
+  try{
+   if(!engineAudio.current){
+    const context=new AudioContext(),primary=context.createOscillator(),secondary=context.createOscillator(),filter=context.createBiquadFilter(),master=context.createGain()
+    primary.type='sawtooth';secondary.type='triangle';secondary.detune.value=-8
+    filter.type='lowpass';filter.frequency.value=1400;filter.Q.value=.7
+    const primaryGain=context.createGain(),secondaryGain=context.createGain()
+    primaryGain.gain.value=.32;secondaryGain.gain.value=.16;master.gain.value=0
+    primary.connect(primaryGain);secondary.connect(secondaryGain);primaryGain.connect(filter);secondaryGain.connect(filter);filter.connect(master);master.connect(context.destination)
+    primary.start();secondary.start()
+    engineAudio.current={context,primary,secondary,filter,master}
+   }
+   if(engineAudio.current.context.state==='suspended')void engineAudio.current.context.resume().catch(()=>{})
+  }catch{}
+ },[])
  const circuit=useMemo(()=>makeCircuit(setup.track),[setup.track])
  useEffect(()=>{try{const stored=JSON.parse(localStorage.getItem('apex-settings')||'null');if(stored&&Number.isInteger(stored.track)&&stored.track>=0&&stored.track<tracks.length&&[0,1,2,3].includes(stored.driver)&&[0,1,2].includes(stored.team)&&[1,3,5].includes(stored.laps)&&[0,1,2].includes(stored.difficulty))setSetup({...defaultSetup,...stored,engine:['v8','v10'].includes(stored.engine)?stored.engine:defaultSetup.engine,weather:['clear','cloudy','rain','heavy-rain'].includes(stored.weather)?stored.weather:defaultSetup.weather,trackCondition:['dry','damp','wet'].includes(stored.trackCondition)?stored.trackCondition:defaultSetup.trackCondition});const savedRecords=JSON.parse(localStorage.getItem('apex-real-circuit-records-v2')||'{}');if(savedRecords&&typeof savedRecords==='object')setRecords(Object.fromEntries(Object.entries(savedRecords).filter(([key,value])=>tracks.some((_,i)=>String(i)===key)&&typeof value==='number'&&Number.isFinite(value)&&value>0)) as Record<string,number>)}catch{}setLoaded(true)},[])
  useEffect(()=>{if(loaded)try{localStorage.setItem('apex-settings',JSON.stringify(setup))}catch{}},[setup,loaded])
+ useEffect(()=>{
+  let frame=0
+  const updateSound=()=>{
+   const sound=engineAudio.current,player=race?.cars[0],engine=engineSpecs[setup.engine??'v10']
+   if(sound){
+    const active=!!player&&!!race&&!race.paused&&!race.finished&&player.pitState!=='stopped'
+    const maxSpeed=engine.topSpeed+8,speedRatio=Math.max(0,Math.min(1,(player?.speed??0)/maxSpeed)),gearIndex=Math.min(7,Math.floor(speedRatio*8)),gearProgress=Math.min(1,speedRatio*8-gearIndex)
+    const throttle=keys.current.has('w')||keys.current.has('arrowup'),idleRpm=engine.peakRpm*.22
+    const rpm=Math.min(engine.peakRpm,idleRpm+gearProgress*(engine.peakRpm-idleRpm)+(throttle?(engine.peakRpm-idleRpm)*.16:0))
+    const pulseHz=rpm*(setup.engine==='v8'?8:10)/120,now=sound.context.currentTime
+    sound.primary.frequency.setTargetAtTime(pulseHz,now,.045);sound.secondary.frequency.setTargetAtTime(pulseHz*.5,now,.055)
+    sound.filter.frequency.setTargetAtTime(1000+speedRatio*2100,now,.08)
+    sound.master.gain.setTargetAtTime(active?(throttle?.22:.12)*(0.78+speedRatio*.22):0,now,.08)
+   }
+   frame=requestAnimationFrame(updateSound)
+  }
+  frame=requestAnimationFrame(updateSound)
+  return()=>cancelAnimationFrame(frame)
+ },[race,setup.engine])
+ useEffect(()=>()=>{const sound=engineAudio.current;if(sound){void sound.context.close();engineAudio.current=null}},[])
  useEffect(()=>{
   if(!race)return
   const down=(e:KeyboardEvent)=>{if(e.isComposing||e.keyCode===229)return;const k=e.key.toLowerCase();if(['arrowup','arrowdown','arrowleft','arrowright',' '].includes(k))e.preventDefault();if(k==='p'){if(!e.repeat){requestPit(race);render(v=>v+1)}return}keys.current.add(k);if(e.repeat)return;if(k==='escape'){race.paused=!race.paused;keys.current.clear();render(v=>v+1)}if(k==='c')race.camera=1-race.camera;if(k==='r'&&!race.finished)resetCar(race,circuit)}
@@ -65,7 +103,7 @@ export default function Game(){
   document.addEventListener('keydown',trap)
   return()=>{document.removeEventListener('keydown',trap);if(previous?.isConnected)previous.focus()}
  },[help,race?.paused,race?.finished])
- const start=()=>{keys.current.clear();setRace(createRace(circuit,setup))}
+ const start=()=>{keys.current.clear();startEngineAudio();setRace(createRace(circuit,setup))}
  const change=<K extends keyof Setup>(key:K,value:Setup[K])=>setSetup(s=>({...s,[key]:value}))
  const driver=drivers[setup.driver],team=teams[setup.team],track=tracks[setup.track]
  if(race){const order=standings(race),player=race.cars[0],position=order.indexOf(player)+1;return <main className="race-screen">
@@ -76,7 +114,7 @@ export default function Game(){
   <div className={`drs-panel ${player.drsOpen?'active':''}`}><div className="drs-heading"><span>REAR WING · {engineSpecs[setup.engine??'v10'].label}</span><b>{player.drsOpen?'DRS OPEN':'DRS CLOSED'}</b></div><div className="drs-meter"><i style={{width:player.drsOpen?'100%':player.drsEligibleUntil>=player.progress?'62%':'0%'}}/></div><div className="drs-foot"><span>{race.trackWetness>.2?'DISABLED · WET TRACK':player.drsOpen?'LOW DRAG · EXTRA SPEED':player.drsEligibleUntil>=player.progress?'ELIGIBLE · ENTER ZONE':'WAIT FOR A DRS DETECTION'}</span>AUTO + THROTTLE</div></div>
   <div className="race-map"><TrackOutline id={setup.track} race={race}/><span className="drs-map-legend"><i/> DRS ZONES</span></div>
   <div className="speedometer"><div className="rev-bars">{Array.from({length:16},(_,i)=><i key={i} style={{background:player.speed/(engineSpecs[setup.engine??'v10'].topSpeed+(player.drsOpen?8:0))*16>i?(i>12?'#ff443e':'#dbe4db'):'#ffffff20'}}/>)}</div><div><strong>{Math.round(player.speed*3.6)}</strong><span>{player.inSlipstream?'KM/H · SLIPSTREAM':`KM/H · ${engineSpecs[setup.engine??'v10'].label}`}</span><b>{Math.max(1,Math.min(8,Math.floor(player.speed/12)+1))}<small>GEAR</small></b></div></div>
-  <div className="race-bottom"><span><kbd>C</kbd> CAMERA <kbd>R</kbd> RESET <kbd>P</kbd> PIT <kbd>ESC</kbd> PAUSE</span><span>{player.pitState==='entry'?'PIT LANE ENTRY':player.pitState==='stopped'?'PIT STOP · CHOOSE TYRES':player.pitState==='exit'?'REJOINING TRACK':race.offroad?'TRACK LIMIT · RETURN TO CIRCUIT':`${(setup.weather??'clear').toUpperCase()} · ${Math.round(race.trackWetness*100)}% TRACK WET`}</span><button className="pit-button" disabled={player.pitState!=='track'||race.finished||race.countdown>0} onClick={()=>{requestPit(race);render(v=>v+1)}}><Wrench size={13}/>{player.pitState==='track'?'PIT NOW':player.pitState==='stopped'?`CHANGE TYRES · ${player.pitTimer.toFixed(1)}s`:'PIT IN PROGRESS'}</button></div>
+  <div className="race-bottom"><span><kbd>C</kbd> CAMERA <kbd>R</kbd> RESET <kbd>P</kbd> PIT <kbd>ESC</kbd> PAUSE</span><span>{player.pitState==='entry'?'PIT LANE ENTRY':player.pitState==='stopped'?'PIT STOP · CHOOSE TYRES':player.pitState==='exit'?'REJOINING TRACK':race.offroad?'OFF TRACK · REDUCED GRIP':`${(setup.weather??'clear').toUpperCase()} · ${Math.round(race.trackWetness*100)}% TRACK WET`}</span><button className="pit-button" disabled={player.pitState!=='track'||race.finished||race.countdown>0} onClick={()=>{requestPit(race);render(v=>v+1)}}><Wrench size={13}/>{player.pitState==='track'?'PIT NOW':player.pitState==='stopped'?`CHANGE TYRES · ${player.pitTimer.toFixed(1)}s`:'PIT IN PROGRESS'}</button></div>
   {player.pitState==='stopped'&&<div className="tyre-picker"><span className="eyebrow">PIT CREW READY · SELECT A COMPOUND</span><div>{(['soft','medium','hard'] as Tyre[]).map(t=><button key={t} className={player.tyre===t?'selected':''} onClick={()=>{changeTyres(race,t);render(v=>v+1)}}><i style={{background:tyreSpecs[t].color}}/><b>{tyreSpecs[t].label}</b><small>{Math.round(tyreSpecs[t].grip*100)}% GRIP · {Math.round(tyreSpecs[t].wear*100)}% WEAR</small></button>)}</div><p>Stop timer: {player.pitTimer.toFixed(1)}s · Fresh tyres restore grip for the next DRS attack.</p></div>}
   {race.countdown>0&&!race.paused&&<div className="countdown"><div>{[0,1,2,3,4].map(i=><i key={i} className={3.5-race.countdown>i*.55?'lit':''}/>)}</div><p>LIGHTS OUT. MAKE IT COUNT.</p></div>}
   {(race.paused||race.finished)&&<div className="modal-backdrop"><section className="race-modal" role="dialog" aria-modal="true" aria-label={race.finished?'Race results':'Race paused'}><span className="eyebrow">{race.finished?'CHEQUERED FLAG':'TAKE A BREATHER'}</span><h2>{race.finished?'Race complete.':'Race paused.'}</h2>{race.finished?<><p>You finished P{position} at {track.name}.</p><div className="results">{order.map((car,i)=><div key={car.name}><b>{i+1}</b><span>{car.name}</span><small>{car.finish?formatTime(car.finish):'Still racing'}</small></div>)}</div><p>Personal best lap <b>{formatTime(player.best)}</b></p></>:<p>Your place on the grid is waiting.</p>}{!race.finished&&<button className="primary" onClick={()=>{race.paused=false;render(v=>v+1)}}>Resume race <ArrowRight size={16}/></button>}<button className={race.finished?'primary':'secondary'} onClick={start}><RotateCcw size={15}/>{race.finished?'Race again':'Restart race'}</button><button className="text-button" onClick={()=>setRace(null)}>Return to race setup</button></section></div>}
@@ -91,9 +129,10 @@ export default function Game(){
   </section></div>
   <section className="race-launch"><div className="race-options"><label>ENGINE<select value={setup.engine??'v10'} onChange={e=>change('engine',e.target.value as NonNullable<Setup['engine']>)}><option value="v8">V8 · responsive</option><option value="v10">V10 · high revs</option></select></label><label>RACE LENGTH<select value={setup.laps} onChange={e=>change('laps',Number(e.target.value))}><option value={1}>1 lap · Sprint</option><option value={3}>3 laps · Short race</option><option value={5}>5 laps · Grand race</option></select></label><label>AI DIFFICULTY<select value={setup.difficulty} onChange={e=>change('difficulty',Number(e.target.value))}><option value={0}>Rookie</option><option value={1}>Competitive</option><option value={2}>Expert</option></select></label><label>WEATHER<select value={setup.weather??'clear'} onChange={e=>change('weather',e.target.value as NonNullable<Setup['weather']>)}><option value="clear">Clear</option><option value="cloudy">Cloudy</option><option value="rain">Rain</option><option value="heavy-rain">Heavy rain</option></select></label><label>TRACK CONDITION<select value={setup.trackCondition??'dry'} onChange={e=>change('trackCondition',e.target.value as NonNullable<Setup['trackCondition']>)}><option value="dry">Dry</option><option value="damp">Damp</option><option value="wet">Wet</option></select></label><div className="best-record"><Trophy size={15}/><span>PERSONAL BEST<b>{formatTime(records[setup.track])}</b></span></div></div><button className="primary start-button" onClick={start}>START YOUR ENGINE <ArrowRight size={20}/></button></section>
   <footer><span><Keyboard size={14}/><kbd>W A S D</kbd> DRIVE <i/> <kbd>S / ↓</kbd> <span className="footer-brake">BRAKE</span></span><button onClick={()=>setHelp(true)}>VIEW CONTROLS <ArrowUpRight size={12}/></button><span className="unofficial">UNOFFICIAL FAN EXPERIENCE. NOT AFFILIATED WITH FORMULA 1.</span></footer><p className="mobile-notice">For the best experience, play on a desktop with a keyboard.</p>
-  </div>{help&&<div className="modal-backdrop"><section className="race-modal" role="dialog" aria-modal="true" aria-label="Driving controls"><button className="close-button" aria-label="Close controls" onClick={()=>setHelp(false)}><X/></button><span className="eyebrow">BEFORE LIGHTS OUT</span><h2>Find your racing line.</h2><p>There is no corner-specific speed cap. Keep W held to maintain throttle, and steer through corners with A/D.</p><div className="controls-list">{[['W / ↑','Accelerate'],['S / ↓','Brake'],['A D / ← →','Steer'],['P','Pit and change tyres'],['C','Switch camera'],['R','Reset to track'],['ESC','Pause / resume']].map(([key,label])=><div key={key}><kbd>{key}</kbd><span>{label}</span></div>)}</div><p className="muted">Follow a car within about 50m on a straight to pick up its slipstream; the speed display will say SLIPSTREAM ACTIVE. Steer into a clear lane early to pass. The collision buffer now allows safe side-by-side passes. Choose a V8 or V10 engine. DRS opens automatically in a marked zone when you are within one second of another car and holding the throttle; wet conditions disable it.</p><p className="muted">Every venue uses its real GPS-based layout and a unique circuit environment, with its own trackside colors and surroundings. Floodlit circuits race after dark or at twilight. Rival pace and overtakes vary each race; track grip changes with your weather and surface choices. Records stay on this device.</p><p className="muted">Circuit data: <a href="https://github.com/bacinger/f1-circuits" target="_blank" rel="noreferrer">Tomislav Bacinger · MIT license</a>. Venue scenery is an artistic recreation.</p><button className="primary" onClick={()=>setHelp(false)}>Ready to race <ArrowRight size={16}/></button></section></div>}
+  </div>{help&&<div className="modal-backdrop"><section className="race-modal" role="dialog" aria-modal="true" aria-label="Driving controls"><button className="close-button" aria-label="Close controls" onClick={()=>setHelp(false)}><X/></button><span className="eyebrow">BEFORE LIGHTS OUT</span><h2>Find your racing line.</h2><p>Steer into corners with A/D and keep the throttle down. The car no longer slows automatically for turns; leaving the track still costs speed.</p><div className="controls-list">{[['W / ↑','Accelerate'],['S / ↓','Brake'],['A D / ← →','Steer'],['P','Pit and change tyres'],['C','Switch camera'],['R','Reset to track'],['ESC','Pause / resume']].map(([key,label])=><div key={key}><kbd>{key}</kbd><span>{label}</span></div>)}</div><p className="muted">Follow a car within about 50m on a straight to pick up its slipstream; the speed display will say SLIPSTREAM ACTIVE. Steer into a clear lane early to pass. The collision buffer now allows safe side-by-side passes. Choose a V8 or V10 engine. DRS opens automatically in a marked zone when you are within one second of another car and holding the throttle; wet conditions disable it.</p><p className="muted">Every venue uses its real GPS-based layout and a unique circuit environment, with its own trackside colors and surroundings. Floodlit circuits race after dark or at twilight. Rival pace and overtakes vary each race; track grip changes with your weather and surface choices. Records stay on this device.</p><p className="muted">Circuit data: <a href="https://github.com/bacinger/f1-circuits" target="_blank" rel="noreferrer">Tomislav Bacinger · MIT license</a>. Venue scenery is an artistic recreation.</p><button className="primary" onClick={()=>setHelp(false)}>Ready to race <ArrowRight size={16}/></button></section></div>}
  </main>
 }
+
 
 
 
